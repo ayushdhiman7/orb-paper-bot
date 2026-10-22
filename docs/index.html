@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ORB Paper Bot</title>
+<meta name="theme-color" content="#0f1419">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #0f1419; --card: #181f27; --line: #2a3441; --text: #e8edf2; --muted: #8b98a7;
+    --pos: #3ecf8e; --neg: #ff6b6b; --accent: #6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 16px; }
+  button { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 14px; font: inherit; font-size: .9rem; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .v { font-size: 1.35rem; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
+  .card h2 { font-size: .95rem; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+  svg { width: 100%; height: auto; display: block; }
+  .trade { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .trade:first-of-type { border-top: 0; }
+  .sym { font-weight: 600; }
+  .badge { font-size: .7rem; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); margin-left: 6px; color: var(--muted); }
+  .pnl { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
+  .meta { color: var(--muted); font-size: .8rem; }
+  .meta.r { text-align: right; }
+  .empty, .err { color: var(--muted); text-align: center; padding: 18px 6px; font-size: .92rem; }
+  .err { color: var(--neg); }
+  footer { color: var(--muted); font-size: .75rem; text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ORB Paper Bot</h1>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<p class="sub" id="status">Paper trading, fake money</p>
+
+<div class="grid">
+  <div class="tile"><div class="k">Total P&amp;L</div><div class="v" id="total">-</div></div>
+  <div class="tile"><div class="k">Today</div><div class="v" id="today">-</div></div>
+  <div class="tile"><div class="k">Win rate</div><div class="v" id="win">-</div></div>
+  <div class="tile"><div class="k">Trades</div><div class="v" id="count">-</div></div>
+</div>
+
+<div class="card">
+  <h2>Cumulative P&amp;L</h2>
+  <div id="chart"></div>
+</div>
+
+<div class="card">
+  <h2>Recent trades</h2>
+  <div id="list"></div>
+</div>
+
+<footer>Simulated trades only. Not financial advice.</footer>
+
+<script>
+const SUPABASE_URL = "https://gbqmvnekxsckzjzcorac.supabase.co";
+// Publishable key: safe to expose, it can only do what the table's read-only policy allows.
+const SUPABASE_KEY = "sb_publishable_xqMJstPMLis5zzOIxityFw_Fz32fdv3";
+const CACHE_KEY = "orb_trades_v1";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const inr = (n) => (n < 0 ? "-" : n > 0 ? "+" : "") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cls = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "");
+const istDay = (d) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const istTime = (d) => new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+function setTile(id, text, n) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "v " + (n === undefined ? "" : cls(n));
+}
+
+function render(trades, note) {
+  const asc = [...trades].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const total = asc.reduce((s, t) => s + Number(t.pnl), 0);
+  const today = istDay(new Date());
+  const todayPnl = asc.filter((t) => istDay(t.ts) === today).reduce((s, t) => s + Number(t.pnl), 0);
+  const wins = asc.filter((t) => Number(t.pnl) > 0).length;
+
+  setTile("total", inr(total), total);
+  setTile("today", inr(todayPnl), todayPnl);
+  setTile("win", asc.length ? Math.round((wins / asc.length) * 100) + "%" : "-");
+  setTile("count", String(asc.length));
+  $("status").textContent = note || "Paper trading, fake money";
+
+  drawChart(asc);
+
+  const list = $("list");
+  if (!asc.length) {
+    list.innerHTML = '<div class="empty">No trades yet. The bot runs on weekdays at about 9:35 AM IST and some days it takes no trade.</div>';
+    return;
+  }
+  list.innerHTML = [...asc].reverse().slice(0, 50).map((t) => {
+    const pnl = Number(t.pnl);
+    return `<div class="trade">
+      <div><span class="sym">${esc(String(t.symbol).replace(".NS", ""))}</span><span class="badge">${esc(t.side)}</span><span class="badge">${esc(t.reason || "")}</span></div>
+      <div class="pnl ${cls(pnl)}">${inr(pnl)}</div>
+      <div class="meta">${esc(t.qty)} sh &middot; ${Number(t.entry).toFixed(2)} &rarr; ${Number(t.exit).toFixed(2)}</div>
+      <div class="meta r">${esc(istTime(t.ts))}</div>
+    </div>`;
+  }).join("");
+}
+
+function drawChart(asc) {
+  const box = $("chart");
+  if (!asc.length) { box.innerHTML = '<div class="empty">The chart appears after the first trade.</div>'; return; }
+  let run = 0;
+  const pts = [{ v: 0 }].concat(asc.map((t) => ({ v: (run += Number(t.pnl)) })));
+  const W = 340, H = 170, L = 8, R = 8, T = 14, B = 14;
+  const min = Math.min(0, ...pts.map((p) => p.v));
+  const max = Math.max(0, ...pts.map((p) => p.v));
+  const span = max - min || 1;
+  const x = (i) => L + (pts.length === 1 ? 0 : (i / (pts.length - 1)) * (W - L - R));
+  const y = (v) => T + (1 - (v - min) / span) * (H - T - B);
+  const path = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
+  const last = pts[pts.length - 1];
+  const color = last.v >= 0 ? "var(--pos)" : "var(--neg)";
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative profit and loss, now ${esc(inr(last.v))}">
+    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)" stroke-dasharray="4 4"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(pts.length - 1)}" cy="${y(last.v)}" r="4" fill="${color}"/>
+    <text x="${L}" y="${H - 2}" fill="var(--muted)" font-size="10">${esc(inr(min))}</text>
+    <text x="${W - R}" y="10" fill="var(--muted)" font-size="10" text-anchor="end">${esc(inr(max))}</text>
+  </svg>`;
+}
+
+async function load() {
+  const btn = $("refresh");
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/paper_trades?select=*&order=ts.desc&limit=1000`, {
+      headers: { apikey: SUPABASE_KEY },
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, at: Date.now() })); } catch (e) {}
+    render(data, "Updated " + new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+  } catch (e) {
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (_) {}
+    if (cached) render(cached.data, "Offline, showing saved data from " + istTime(cached.at));
+    else $("list").innerHTML = '<div class="err">Could not load trades (' + esc(e.message) + '). Check your connection and tap Refresh.</div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("refresh").addEventListener("click", load);
+load();
+setInterval(load, 60000);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
