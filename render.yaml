@@ -1,0 +1,12 @@
+services:
+  - type: worker
+    name: orb-paper-bot
+    runtime: docker
+    plan: starter        # Render has no free worker tier; see README for free options
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: CAPITAL
+        value: "4000"
