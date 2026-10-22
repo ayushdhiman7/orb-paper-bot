@@ -20,8 +20,15 @@ Run it on a weekday during market hours (9:15-15:30 IST). It sleeps otherwise.
 2. SQL Editor: run `schema.sql`.
 3. Settings -> API: copy the project URL and the `service_role` key into env vars `SUPABASE_URL` and `SUPABASE_KEY`. Never commit the key.
 
-## Deploy
-The bot is a long-running worker, so it needs an always-on host.
+## Deploy (free, GitHub Actions)
+`.github/workflows/paper-trade.yml` starts the bot every weekday at about 9:35 AM IST and stops it after the 3:15 PM square-off.
+1. Repo -> Settings -> Secrets and variables -> Actions -> New repository secret.
+2. Add `SUPABASE_URL` and `SUPABASE_KEY` (service_role key).
+3. Actions tab -> paper-trade-session -> Run workflow to test it by hand.
+Notes: scheduled runs can start a few minutes late, GitHub pauses schedules after 60 days without repo activity, and it only runs on market days (holidays just end with 0 trades).
+
+## Other hosting
+The bot can also run as a long-running worker.
 - **Free option:** a GitHub Actions cron is awkward for a long loop; the simplest free route is running it on your own PC/laptop during market hours, or Oracle Cloud's always-free VM.
 - **Paid but easy:** Render background worker (`render.yaml` included, starter plan), Railway, or Fly.io.
 

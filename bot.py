@@ -26,6 +26,7 @@ DAILY_LOSS_CAP_PCT = float(os.getenv("DAILY_LOSS_CAP_PCT", "3.0"))
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
 COST_PER_ORDER = float(os.getenv("COST_PER_ORDER", "20"))  # rough brokerage+charges, INR
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
+ONE_DAY = os.getenv("ONE_DAY", "0") == "1"   # exit after today's session (used by GitHub Actions)
 
 MARKET_OPEN = dtime(9, 15)
 RANGE_END = dtime(9, 30)      # opening range = 9:15 to 9:30
@@ -102,6 +103,9 @@ def last_price(symbol: str):
 def compute_opening_range(symbol: str):
     df = fetch_candles(symbol)
     if df.empty:
+        return None
+    # Data is delayed ~15 min: wait until the candles cover the whole 9:15-9:30 window.
+    if df.index.max().time() < dtime(9, 29):
         return None
     window = df.between_time(MARKET_OPEN, RANGE_END)
     if window.empty:
@@ -191,6 +195,10 @@ def run():
         now = datetime.now(IST)
         t = now.time()
 
+        if ONE_DAY and (now.weekday() >= 5 or t > MARKET_CLOSE):
+            print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
+            return
+
         if now.weekday() >= 5 or t < MARKET_OPEN or t > MARKET_CLOSE:
             print(f"{now:%H:%M} market closed, sleeping")
             if t > MARKET_CLOSE and state.trades_today:
@@ -204,6 +212,9 @@ def run():
                 p = last_price(sym)
                 if p is not None:
                     close_position(state, sym, p, "square_off", now)
+            if ONE_DAY:
+                print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
+                return
         elif t >= RANGE_END:
             if not state.ranges:
                 for sym in SYMBOLS:
