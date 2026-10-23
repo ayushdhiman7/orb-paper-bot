@@ -8,11 +8,14 @@ Opening-Range-Breakout PAPER trading bot for NSE stocks.
 import csv
 import os
 import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
+
+warnings.filterwarnings("ignore")  # yfinance/pandas deprecation noise buries the real log lines
 
 IST = ZoneInfo("Asia/Kolkata")
 
