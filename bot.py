@@ -44,6 +44,7 @@ class Position:
     stop: float
     target: float
     opened_at: datetime
+    row_id: object = None    # Supabase row id of this trade while it is open
 
 
 @dataclass
@@ -69,13 +70,32 @@ def get_supabase():
 SB = get_supabase()
 
 
-def log_trade(row: dict):
+def log_entry(pos):
+    """Save a trade as 'open' the moment it is entered, so the dashboard can show it."""
+    if not SB:
+        return None
+    try:
+        res = SB.table("paper_trades").insert({
+            "ts": pos.opened_at.isoformat(), "symbol": pos.symbol, "side": pos.side,
+            "qty": pos.qty, "entry": round(pos.entry, 2), "reason": "open",
+            "status": "open", "mode": "paper",
+        }).execute()
+        return res.data[0]["id"]
+    except Exception as e:  # never let logging crash the bot
+        print(f"[warn] Supabase open-trade insert failed: {e}")
+        return None
+
+
+def log_trade(row: dict, row_id=None):
     if SB:
         try:
-            SB.table("paper_trades").insert(row).execute()
+            if row_id is not None:
+                SB.table("paper_trades").update({**row, "status": "closed"}).eq("id", row_id).execute()
+            else:
+                SB.table("paper_trades").insert({**row, "status": "closed"}).execute()
             return
         except Exception as e:  # never let logging crash the bot
-            print(f"[warn] Supabase insert failed: {e}")
+            print(f"[warn] Supabase write failed: {e}")
     new = not os.path.exists("trades.csv")
     with open("trades.csv", "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(row.keys()))
@@ -147,7 +167,9 @@ def try_entry(state: State, symbol: str, now: datetime):
         return
     risk = abs(price - stop)
     target = price + risk * TARGET_RR if side == "BUY" else price - risk * TARGET_RR
-    state.positions[symbol] = Position(symbol, side, qty, price, stop, target, now)
+    pos = Position(symbol, side, qty, price, stop, target, now)
+    pos.row_id = log_entry(pos)
+    state.positions[symbol] = pos
     state.trades_today += 1
     state.day_pnl -= COST_PER_ORDER
     print(f"[ENTRY] {side} {qty} {symbol} @ {price:.2f} SL {stop:.2f} TP {target:.2f}")
@@ -164,7 +186,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
         "ts": now.isoformat(), "symbol": symbol, "side": pos.side, "qty": pos.qty,
         "entry": round(pos.entry, 2), "exit": round(price, 2),
         "pnl": round(pnl, 2), "reason": reason, "mode": "paper",
-    })
+    }, row_id=pos.row_id)
 
 
 def manage_positions(state: State, now: datetime):

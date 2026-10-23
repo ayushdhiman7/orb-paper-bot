@@ -56,6 +56,11 @@
   <div class="tile"><div class="k">Trades</div><div class="v" id="count">-</div></div>
 </div>
 
+<div class="card" id="opencard" style="display:none">
+  <h2>Open now</h2>
+  <div id="openlist"></div>
+</div>
+
 <div class="card">
   <h2>Cumulative P&amp;L</h2>
   <div id="chart"></div>
@@ -87,7 +92,21 @@ function setTile(id, text, n) {
   el.className = "v " + (n === undefined ? "" : cls(n));
 }
 
-function render(trades, note) {
+function renderOpen(open) {
+  const card = $("opencard");
+  if (!open.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+  $("openlist").innerHTML = open.map((t) => `<div class="trade">
+      <div><span class="sym">${esc(String(t.symbol).replace(".NS", ""))}</span><span class="badge">${esc(t.side)}</span><span class="badge">OPEN</span></div>
+      <div class="pnl">${esc(t.qty)} sh</div>
+      <div class="meta">Entered at ${Number(t.entry).toFixed(2)}</div>
+      <div class="meta r">${esc(istTime(t.ts))}</div>
+    </div>`).join("");
+}
+
+function render(all, note) {
+  renderOpen(all.filter((t) => t.status === "open"));
+  const trades = all.filter((t) => t.status !== "open");
   const asc = [...trades].sort((a, b) => new Date(a.ts) - new Date(b.ts));
   const total = asc.reduce((s, t) => s + Number(t.pnl), 0);
   const today = istDay(new Date());
