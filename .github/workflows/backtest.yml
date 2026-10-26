@@ -16,3 +16,5 @@ jobs:
       - run: python -u backtest.py
         env:
           CAPITAL: "4000"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

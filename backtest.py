@@ -182,6 +182,25 @@ def fmt(m):
             f"| expectancy Rs {m['exp']:.2f}/trade | profit factor {pf} | total Rs {m['total']:.2f} | max drawdown Rs {m['maxdd']:.2f}")
 
 
+def _clean(m):
+    """JSON-safe copy of a metrics dict (no inf / numpy types)."""
+    return {k: (None if isinstance(v, float) and v in (float("inf"), float("-inf")) else float(v)) for k, v in m.items()}
+
+
+def save_result(result, text):
+    """Store the run in Supabase so the dashboard's Backtest tab can show it (skipped if no keys)."""
+    url, key = os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        print("[info] SUPABASE_URL/KEY not set, results not saved to the dashboard.")
+        return
+    try:
+        from supabase import create_client
+        create_client(url, key).table("backtest_runs").insert({"result": result, "summary_md": text}).execute()
+        print("[info] Saved to Supabase: open the dashboard's Backtest tab.")
+    except Exception as e:  # never fail the run because of the save
+        print(f"[warn] Could not save results: {e}")
+
+
 def main(data=None):
     data = data if data is not None else load_data(SYMBOLS)
     if not data:
@@ -217,12 +236,24 @@ def main(data=None):
     te = metrics([t for t in grid[best] if t["day"] in set(test_days)])
     out += [f"## Train vs test (best settings on training days: stop {best[0]}%, target {best[1]}x)",
             f"Train ({len(train_days)} days): {fmt(tr)}", f"Test ({len(test_days)} unseen days): {fmt(te)}", ""]
-    if te["n"] and tr["exp"] > 0 and te["exp"] < 0.5 * tr["exp"]:
+    overfit = bool(te["n"] and tr["exp"] > 0 and te["exp"] < 0.5 * tr["exp"])
+    if overfit:
         out.append("Warning: out-of-sample expectancy is under half of in-sample. Typical sign of overfitting.")
     out += ["", "Limits: free 5-minute data covers about 60 days, entries assume the bar close, stops assume a fill at the "
             "stop price, and results are paper only. This is a smoke test, not proof of an edge. Not financial advice."]
     text = "\n".join(out)
     print(text)
+    result = {
+        "meta": {"symbols": list(data), "days": len(days), "first": str(days[0]), "last": str(days[-1]),
+                 "capital": CAPITAL, "cost_pct": COST_PCT, "slippage_pct": SLIPPAGE_PCT},
+        "baseline": {**_clean(base), "stop": BASE[0], "rr": BASE[1], "verdict": verdict(base, len(days))},
+        "grid": [{"stop": s, "rr": r, **_clean(gm[(s, r)])} for s, r in itertools.product(STOPS, RRS)],
+        "positive": positive, "cells": len(gm),
+        "best": {"stop": best[0], "rr": best[1]},
+        "train": {**_clean(tr), "days": len(train_days)}, "test": {**_clean(te), "days": len(test_days)},
+        "overfit_warning": overfit,
+    }
+    save_result(result, text)
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:

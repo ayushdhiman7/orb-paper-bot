@@ -4,186 +4,375 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ORB Paper Bot</title>
-<meta name="theme-color" content="#0f1419">
+<meta name="theme-color" content="#0d1117">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
-    --bg: #0f1419; --card: #181f27; --line: #2a3441; --text: #e8edf2; --muted: #8b98a7;
-    --pos: #3ecf8e; --neg: #ff6b6b; --accent: #6ea8fe;
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c232d; --line: #2a323d;
+    --text: #e6edf3; --muted: #8b949e; --pos: #3fb950; --neg: #f85149; --accent: #58a6ff; --warn: #d29922;
+    --r: 14px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-  h1 { font-size: 1.25rem; margin: 0; }
-  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 16px; }
-  button { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
-    padding: 8px 14px; font: inherit; font-size: .9rem; cursor: pointer; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
-  .tile .k { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
-  .tile .v { font-size: 1.35rem; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .pos { color: var(--pos); } .neg { color: var(--neg); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
-  .card h2 { font-size: .95rem; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+  body { padding: 0 16px max(28px, env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+  .top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: max(14px, env(safe-area-inset-top)) 0 10px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 1.15rem; margin: 0; letter-spacing: .01em; }
+  .status { color: var(--muted); font-size: .78rem; margin: 2px 0 10px; }
+  button { font: inherit; color: var(--text); cursor: pointer; }
+  .btn { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 7px 14px; font-size: .88rem; }
+  .btn:disabled { opacity: .6; }
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 12px; padding: 4px; }
+  .tab { background: none; border: 0; border-radius: 9px; padding: 9px 4px; font-size: .86rem; color: var(--muted); }
+  .tab[aria-selected="true"] { background: var(--surface2); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .panel { padding-top: 14px; }
+  .panel[hidden] { display: none; }
+  .hero { margin: 2px 0 14px; }
+  .hero .k { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+  .hero .v { font-size: 2.4rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .tile .k { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
+  .tile .v { font-size: 1.05rem; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: .8rem; margin: 0 0 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); } .mut { color: var(--muted); }
   svg { width: 100%; height: auto; display: block; }
-  .trade { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; border-top: 1px solid var(--line); }
-  .trade:first-of-type { border-top: 0; }
-  .sym { font-weight: 600; }
-  .badge { font-size: .7rem; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); margin-left: 6px; color: var(--muted); }
-  .pnl { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; padding-top: 0; }
+  .row:last-child { padding-bottom: 0; }
+  .sym { font-weight: 650; }
+  .badge { font-size: .68rem; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); margin-left: 6px; color: var(--muted); white-space: nowrap; }
+  .badge.live { color: var(--accent); border-color: rgba(88,166,255,.5); }
+  .amt { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
   .meta { color: var(--muted); font-size: .8rem; }
   .meta.r { text-align: right; }
-  .empty, .err { color: var(--muted); text-align: center; padding: 18px 6px; font-size: .92rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+  .chips .lbl { color: var(--muted); font-size: .75rem; align-self: center; margin-right: 2px; }
+  .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 5px 12px; font-size: .8rem; color: var(--muted); }
+  .chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(88,166,255,.12); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 8px 4px; font-size: .86rem; border-top: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+  details { border-top: 1px solid var(--line); }
+  details:first-of-type { border-top: 0; }
+  summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; padding: 11px 0; }
+  summary::-webkit-details-marker { display: none; }
+  .sub { padding: 0 0 8px 10px; border-left: 2px solid var(--line); margin: 0 0 10px 2px; }
+  .sub .row { padding: 7px 0; }
+  .verdict { border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--line); background: var(--surface); }
+  .verdict.bad { border-color: rgba(248,81,73,.55); }
+  .verdict.warn { border-color: rgba(210,153,34,.6); }
+  .verdict.ok { border-color: rgba(63,185,80,.55); }
+  .verdict b { display: block; margin-bottom: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .two .card { margin: 0; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: .84rem; padding: 3px 0; }
+  .kv span:first-child { color: var(--muted); }
+  .empty, .err { color: var(--muted); text-align: center; padding: 22px 8px; font-size: .92rem; }
   .err { color: var(--neg); }
-  footer { color: var(--muted); font-size: .75rem; text-align: center; margin-top: 8px; }
+  .note { color: var(--muted); font-size: .75rem; margin: 10px 0 0; }
+  footer { color: var(--muted); font-size: .72rem; text-align: center; margin-top: 6px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>ORB Paper Bot</h1>
-  <button id="refresh" type="button">Refresh</button>
-</header>
-<p class="sub" id="status">Paper trading, fake money</p>
-
-<div class="grid">
-  <div class="tile"><div class="k">Total P&amp;L</div><div class="v" id="total">-</div></div>
-  <div class="tile"><div class="k">Today</div><div class="v" id="today">-</div></div>
-  <div class="tile"><div class="k">Win rate</div><div class="v" id="win">-</div></div>
-  <div class="tile"><div class="k">Trades</div><div class="v" id="count">-</div></div>
+<div class="top">
+  <div class="bar">
+    <h1>ORB Paper Bot</h1>
+    <button class="btn" id="refresh" type="button">Refresh</button>
+  </div>
+  <p class="status" id="status">Loading...</p>
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="t-overview" data-tab="overview" aria-selected="true" aria-controls="p-overview">Overview</button>
+    <button class="tab" role="tab" id="t-history" data-tab="history" aria-selected="false" aria-controls="p-history">History</button>
+    <button class="tab" role="tab" id="t-stocks" data-tab="stocks" aria-selected="false" aria-controls="p-stocks">Stocks</button>
+    <button class="tab" role="tab" id="t-backtest" data-tab="backtest" aria-selected="false" aria-controls="p-backtest">Backtest</button>
+  </div>
 </div>
 
-<div class="card" id="opencard" style="display:none">
-  <h2>Open now</h2>
-  <div id="openlist"></div>
-</div>
-
-<div class="card">
-  <h2>Cumulative P&amp;L</h2>
-  <div id="chart"></div>
-</div>
-
-<div class="card">
-  <h2>Recent trades</h2>
-  <div id="list"></div>
-</div>
+<section class="panel" id="p-overview" role="tabpanel" aria-labelledby="t-overview"></section>
+<section class="panel" id="p-history" role="tabpanel" aria-labelledby="t-history" hidden></section>
+<section class="panel" id="p-stocks" role="tabpanel" aria-labelledby="t-stocks" hidden></section>
+<section class="panel" id="p-backtest" role="tabpanel" aria-labelledby="t-backtest" hidden></section>
 
 <footer>Simulated trades only. Not financial advice.</footer>
 
 <script>
 const SUPABASE_URL = "https://gbqmvnekxsckzjzcorac.supabase.co";
-// Publishable key: safe to expose, it can only do what the table's read-only policy allows.
+// Publishable key: safe to expose, it can only do what the read-only table policies allow.
 const SUPABASE_KEY = "sb_publishable_xqMJstPMLis5zzOIxityFw_Fz32fdv3";
-const CACHE_KEY = "orb_trades_v1";
+const CACHE_KEY = "orb_cache_v2";
+
+const state = { trades: [], bt: null, tab: "overview", range: "30", side: "all", reason: "all", note: "Loading..." };
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const inr = (n) => (n < 0 ? "-" : n > 0 ? "+" : "") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const cls = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+const inr = (n) => n == null ? "-" : (n < 0 ? "-" : n > 0 ? "+" : "") + "₹" + Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const inrPlain = (n) => n == null ? "-" : "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cls = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
+const tick = (s) => String(s).replace(".NS", "");
 const istDay = (d) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const istTime = (d) => new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const istClock = (d) => new Date(d).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+const shortDay = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { timeZone: "UTC", day: "numeric", month: "short" });
 
-function setTile(id, text, n) {
-  const el = $(id);
-  el.textContent = text;
-  el.className = "v " + (n === undefined ? "" : cls(n));
+// ---------- derived data ----------
+function split(all) {
+  const open = all.filter((t) => t.status === "open");
+  const closed = all.filter((t) => t.status !== "open").sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  return { open, closed };
+}
+function unrealised(t) {
+  const last = num(t.last_price), entry = num(t.entry), qty = num(t.qty);
+  if (last == null || entry == null || qty == null) return null;
+  return (last - entry) * qty * (t.side === "BUY" ? 1 : -1);
+}
+function stats(trades) {
+  const pnl = trades.map((t) => Number(t.pnl));
+  const wins = pnl.filter((p) => p > 0).length;
+  return { n: trades.length, total: pnl.reduce((a, b) => a + b, 0), winRate: trades.length ? (wins / trades.length) * 100 : null };
 }
 
-function renderOpen(open) {
-  const card = $("opencard");
-  if (!open.length) { card.style.display = "none"; return; }
-  card.style.display = "";
-  $("openlist").innerHTML = open.map((t) => `<div class="trade">
-      <div><span class="sym">${esc(String(t.symbol).replace(".NS", ""))}</span><span class="badge">${esc(t.side)}</span><span class="badge">OPEN</span></div>
-      <div class="pnl">${esc(t.qty)} sh</div>
-      <div class="meta">Entered at ${Number(t.entry).toFixed(2)}</div>
-      <div class="meta r">${esc(istTime(t.ts))}</div>
-    </div>`).join("");
+// ---------- shared pieces ----------
+function tradeRow(t) {
+  const pnl = Number(t.pnl);
+  return `<div class="row">
+    <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge">${esc(t.reason || "")}</span></div>
+    <div class="amt ${cls(pnl)}">${inr(pnl)}</div>
+    <div class="meta">${esc(t.qty)} sh &middot; ${Number(t.entry).toFixed(2)} &rarr; ${Number(t.exit).toFixed(2)}</div>
+    <div class="meta r">${esc(istTime(t.ts))}</div>
+  </div>`;
 }
+function emptyBox(msg) { return `<div class="empty">${esc(msg)}</div>`; }
 
-function render(all, note) {
-  renderOpen(all.filter((t) => t.status === "open"));
-  const trades = all.filter((t) => t.status !== "open");
-  const asc = [...trades].sort((a, b) => new Date(a.ts) - new Date(b.ts));
-  const total = asc.reduce((s, t) => s + Number(t.pnl), 0);
-  const today = istDay(new Date());
-  const todayPnl = asc.filter((t) => istDay(t.ts) === today).reduce((s, t) => s + Number(t.pnl), 0);
-  const wins = asc.filter((t) => Number(t.pnl) > 0).length;
-
-  setTile("total", inr(total), total);
-  setTile("today", inr(todayPnl), todayPnl);
-  setTile("win", asc.length ? Math.round((wins / asc.length) * 100) + "%" : "-");
-  setTile("count", String(asc.length));
-  $("status").textContent = note || "Paper trading, fake money";
-
-  drawChart(asc);
-
-  const list = $("list");
-  if (!asc.length) {
-    list.innerHTML = '<div class="empty">No trades yet. The bot runs on weekdays at about 9:35 AM IST and some days it takes no trade.</div>';
-    return;
-  }
-  list.innerHTML = [...asc].reverse().slice(0, 50).map((t) => {
-    const pnl = Number(t.pnl);
-    return `<div class="trade">
-      <div><span class="sym">${esc(String(t.symbol).replace(".NS", ""))}</span><span class="badge">${esc(t.side)}</span><span class="badge">${esc(t.reason || "")}</span></div>
-      <div class="pnl ${cls(pnl)}">${inr(pnl)}</div>
-      <div class="meta">${esc(t.qty)} sh &middot; ${Number(t.entry).toFixed(2)} &rarr; ${Number(t.exit).toFixed(2)}</div>
-      <div class="meta r">${esc(istTime(t.ts))}</div>
-    </div>`;
-  }).join("");
-}
-
-function drawChart(asc) {
-  const box = $("chart");
-  if (!asc.length) { box.innerHTML = '<div class="empty">The chart appears after the first trade.</div>'; return; }
+function lineChart(closed) {
+  if (!closed.length) return emptyBox("The chart appears after the first closed trade.");
   let run = 0;
-  const pts = [{ v: 0 }].concat(asc.map((t) => ({ v: (run += Number(t.pnl)) })));
-  const W = 340, H = 170, L = 8, R = 8, T = 14, B = 14;
-  const min = Math.min(0, ...pts.map((p) => p.v));
-  const max = Math.max(0, ...pts.map((p) => p.v));
-  const span = max - min || 1;
+  const pts = [0].concat(closed.map((t) => (run += Number(t.pnl))));
+  const W = 340, H = 150, L = 6, R = 6, T = 12, B = 12;
+  const min = Math.min(0, ...pts), max = Math.max(0, ...pts), span = max - min || 1;
   const x = (i) => L + (pts.length === 1 ? 0 : (i / (pts.length - 1)) * (W - L - R));
   const y = (v) => T + (1 - (v - min) / span) * (H - T - B);
-  const path = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
-  const last = pts[pts.length - 1];
-  const color = last.v >= 0 ? "var(--pos)" : "var(--neg)";
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative profit and loss, now ${esc(inr(last.v))}">
+  const d = pts.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+  const last = pts[pts.length - 1], color = last >= 0 ? "var(--pos)" : "var(--neg)";
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative profit and loss, now ${esc(inr(last))}">
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)" stroke-dasharray="4 4"/>
-    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${x(pts.length - 1)}" cy="${y(last.v)}" r="4" fill="${color}"/>
-    <text x="${L}" y="${H - 2}" fill="var(--muted)" font-size="10">${esc(inr(min))}</text>
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(pts.length - 1)}" cy="${y(last)}" r="4" fill="${color}"/>
     <text x="${W - R}" y="10" fill="var(--muted)" font-size="10" text-anchor="end">${esc(inr(max))}</text>
-  </svg>`;
+    <text x="${L}" y="${H - 1}" fill="var(--muted)" font-size="10">${esc(inr(min))}</text></svg>`;
 }
 
+// ---------- Overview ----------
+function renderOverview() {
+  const { open, closed } = split(state.trades);
+  const s = stats(closed);
+  const today = istDay(new Date());
+  const todayPnl = closed.filter((t) => istDay(t.ts) === today).reduce((a, t) => a + Number(t.pnl), 0);
+  const openPnls = open.map(unrealised).filter((v) => v != null);
+  const openTotal = openPnls.length ? openPnls.reduce((a, b) => a + b, 0) : null;
+
+  let openCard = "";
+  if (open.length) {
+    const latest = open.map((t) => t.last_price_ts).filter(Boolean).sort().pop();
+    openCard = `<div class="card"><h2>Open now</h2>${open.map((t) => {
+      const u = unrealised(t), last = num(t.last_price);
+      return `<div class="row">
+        <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge live">OPEN</span></div>
+        <div class="amt ${cls(u)}">${u == null ? "-" : inr(u)}</div>
+        <div class="meta">${esc(t.qty)} sh &middot; in ${Number(t.entry).toFixed(2)} &middot; now ${last == null ? "-" : last.toFixed(2)}</div>
+        <div class="meta r">${esc(istTime(t.ts))}</div></div>`;
+    }).join("")}
+      <p class="note">Prices are delayed about 15 minutes${latest ? ", last updated " + esc(istClock(latest)) : ""}. Open P&amp;L is before costs.</p></div>`;
+  }
+
+  $("p-overview").innerHTML = `
+    <div class="hero"><div class="k">Total P&amp;L (closed trades)</div><div class="v ${cls(s.total)}">${inr(s.total)}</div></div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Today</div><div class="v ${cls(todayPnl)}">${inr(todayPnl)}</div></div>
+      <div class="tile"><div class="k">Open P&amp;L</div><div class="v ${cls(openTotal)}">${openTotal == null ? "-" : inr(openTotal)}</div></div>
+      <div class="tile"><div class="k">Win rate</div><div class="v">${s.winRate == null ? "-" : Math.round(s.winRate) + "%"}</div></div>
+    </div>
+    ${openCard}
+    <div class="card"><h2>Cumulative P&amp;L</h2>${lineChart(closed)}</div>
+    <div class="card"><h2>Recent trades</h2>${closed.length ? [...closed].reverse().slice(0, 8).map(tradeRow).join("") : emptyBox("No closed trades yet. The bot runs on weekdays and some days it takes no trade.")}</div>`;
+}
+
+// ---------- History ----------
+function chips(name, label, options) {
+  return `<div class="chips" role="group" aria-label="${esc(label)}"><span class="lbl">${esc(label)}</span>${options.map(([v, t]) =>
+    `<button type="button" class="chip" data-filter="${name}" data-value="${esc(v)}" aria-pressed="${state[name] === v}">${esc(t)}</button>`).join("")}</div>`;
+}
+function dayBars(days) {
+  if (!days.length) return emptyBox("No closed trades in this range.");
+  const W = 340, H = 150, L = 6, R = 6, T = 14, B = 16;
+  const vals = days.map((d) => d.pnl), min = Math.min(0, ...vals), max = Math.max(0, ...vals), span = max - min || 1;
+  const y = (v) => T + (1 - (v - min) / span) * (H - T - B);
+  const slot = (W - L - R) / days.length, bw = Math.max(2, Math.min(24, slot * 0.7));
+  const bars = days.map((d, i) => {
+    const cx = L + slot * i + slot / 2, y0 = y(0), y1 = y(d.pnl);
+    return `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1.5, Math.abs(y1 - y0)).toFixed(1)}" rx="2" fill="${d.pnl >= 0 ? "var(--pos)" : "var(--neg)"}"><title>${esc(shortDay(d.day))}: ${esc(inr(d.pnl))}</title></rect>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Net profit or loss per day">
+    <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>${bars}
+    <text x="${L}" y="${H - 2}" fill="var(--muted)" font-size="10">${esc(shortDay(days[0].day))}</text>
+    <text x="${W - R}" y="${H - 2}" fill="var(--muted)" font-size="10" text-anchor="end">${esc(shortDay(days[days.length - 1].day))}</text>
+    <text x="${W - R}" y="10" fill="var(--muted)" font-size="10" text-anchor="end">${esc(inr(max))}</text></svg>`;
+}
+function renderHistory() {
+  const { closed } = split(state.trades);
+  const map = new Map();
+  closed.forEach((t) => {
+    const day = istDay(t.ts);
+    if (!map.has(day)) map.set(day, { day, pnl: 0, n: 0, wins: 0, trades: [] });
+    const d = map.get(day), p = Number(t.pnl);
+    d.pnl += p; d.n += 1; d.wins += p > 0 ? 1 : 0; d.trades.push(t);
+  });
+  let days = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
+  if (state.range !== "all") {
+    const cutoff = new Date(Date.now() - Number(state.range) * 86400000);
+    days = days.filter((d) => new Date(d.day + "T00:00:00+05:30") >= cutoff);
+  }
+  const total = days.reduce((a, d) => a + d.pnl, 0), green = days.filter((d) => d.pnl > 0).length;
+  $("p-history").innerHTML = `
+    ${chips("range", "Range", [["7", "7 days"], ["30", "30 days"], ["all", "All"]])}
+    <div class="tiles">
+      <div class="tile"><div class="k">Net P&amp;L</div><div class="v ${cls(total)}">${inr(total)}</div></div>
+      <div class="tile"><div class="k">Days traded</div><div class="v">${days.length}</div></div>
+      <div class="tile"><div class="k">Green days</div><div class="v">${green}/${days.length}</div></div>
+    </div>
+    <div class="card"><h2>Profit or loss per day</h2>${dayBars(days)}</div>
+    <div class="card"><h2>By day</h2>${days.length ? [...days].reverse().map((d) => `
+      <details><summary><div><span class="sym">${esc(shortDay(d.day))}</span><span class="badge">${d.n} trade${d.n > 1 ? "s" : ""}</span></div>
+        <div class="amt ${cls(d.pnl)}">${inr(d.pnl)}</div>
+        <div class="meta">${d.wins} win, ${d.n - d.wins} loss</div><div class="meta r">tap for trades</div></summary>
+        <div class="sub">${d.trades.slice().reverse().map(tradeRow).join("")}</div></details>`).join("") : emptyBox("Nothing to show for this range.")}</div>`;
+}
+
+// ---------- Stocks ----------
+function renderStocks() {
+  const { closed } = split(state.trades);
+  const reasons = [...new Set(closed.map((t) => t.reason).filter(Boolean))].sort();
+  const rows = closed.filter((t) => (state.side === "all" || t.side === state.side) && (state.reason === "all" || t.reason === state.reason));
+  const by = new Map();
+  rows.forEach((t) => {
+    const k = tick(t.symbol);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(t);
+  });
+  const table = [...by.entries()].map(([k, v]) => ({ k, ...stats(v) })).sort((a, b) => b.total - a.total);
+  $("p-stocks").innerHTML = `
+    ${chips("side", "Side", [["all", "All"], ["BUY", "Buy"], ["SELL", "Sell"]])}
+    ${chips("reason", "Exit", [["all", "All"]].concat(reasons.map((r) => [r, r])))}
+    <div class="card"><h2>By stock</h2>${table.length ? `<table><thead><tr><th>Stock</th><th>Trades</th><th>Win</th><th>Net P&amp;L</th></tr></thead><tbody>${table.map((r) =>
+      `<tr><td class="sym">${esc(r.k)}</td><td>${r.n}</td><td>${Math.round(r.winRate)}%</td><td class="${cls(r.total)}">${inr(r.total)}</td></tr>`).join("")}</tbody></table>` : emptyBox("No closed trades match these filters.")}</div>
+    <div class="card"><h2>Trades (${rows.length})</h2>${rows.length ? [...rows].reverse().slice(0, 50).map(tradeRow).join("") : emptyBox("No trades to list.")}</div>`;
+}
+
+// ---------- Backtest ----------
+const pct = (v) => (v == null ? "-" : v.toFixed(0) + "%");
+function metricTiles(m) {
+  const pf = m.pf == null ? "inf" : m.pf.toFixed(2);
+  return `<div class="tiles">
+    <div class="tile"><div class="k">Trades</div><div class="v">${m.n}</div></div>
+    <div class="tile"><div class="k">Win rate</div><div class="v">${pct(m.win)}</div></div>
+    <div class="tile"><div class="k">Per trade</div><div class="v ${cls(m.exp)}">${inr(m.exp)}</div></div>
+    <div class="tile"><div class="k">Profit factor</div><div class="v">${esc(pf)}</div></div>
+    <div class="tile"><div class="k">Total</div><div class="v ${cls(m.total)}">${inr(m.total)}</div></div>
+    <div class="tile"><div class="k">Max drawdown</div><div class="v">${inrPlain(m.maxdd)}</div></div></div>`;
+}
+function splitCard(title, m, days) {
+  return `<div class="card"><h2>${esc(title)}</h2>
+    <div class="kv"><span>Days</span><span>${days}</span></div><div class="kv"><span>Trades</span><span>${m.n}</span></div>
+    <div class="kv"><span>Win rate</span><span>${pct(m.win)}</span></div>
+    <div class="kv"><span>Per trade</span><span class="${cls(m.exp)}">${inr(m.exp)}</span></div>
+    <div class="kv"><span>Total</span><span class="${cls(m.total)}">${inr(m.total)}</span></div></div>`;
+}
+function renderBacktest() {
+  const row = state.bt, el = $("p-backtest");
+  if (!row || !row.result) {
+    el.innerHTML = `<div class="card">${emptyBox("No backtest saved yet. On GitHub open Actions, choose backtest, tap Run workflow, then come back here.")}</div>`;
+    return;
+  }
+  const r = row.result, b = r.baseline, v = String(b.verdict || "");
+  const tone = /^REJECT|^NOT EVAL/.test(v) ? "bad" : /^VALIDATION/.test(v) ? "warn" : "ok";
+  const rrs = [...new Set(r.grid.map((g) => g.rr))], stops = [...new Set(r.grid.map((g) => g.stop))];
+  const maxAbs = Math.max(1, ...r.grid.map((g) => Math.abs(g.total)));
+  const cell = (g) => {
+    const a = Math.min(0.55, (Math.abs(g.total) / maxAbs) * 0.55 + 0.08);
+    const bg = g.total >= 0 ? `rgba(63,185,80,${a})` : `rgba(248,81,73,${a})`;
+    return `<td style="background:${bg};text-align:center;border-radius:6px">${Math.round(g.total)}</td>`;
+  };
+  el.innerHTML = `
+    <p class="status" style="margin-top:0">Run on ${esc(istTime(row.created_at))} &middot; ${esc(r.meta.days)} days (${esc(shortDay(r.meta.first))} to ${esc(shortDay(r.meta.last))}) &middot; ${esc(r.meta.symbols.map(tick).join(", "))}</p>
+    <div class="verdict ${tone}"><b>Verdict</b>${esc(v)}</div>
+    <div class="card"><h2>Baseline (stop ${esc(b.stop)}%, target ${esc(b.rr)}x risk)</h2>${metricTiles(b)}
+      <p class="note">After ${esc(r.meta.cost_pct)}% costs and ${esc(r.meta.slippage_pct)}% slippage per side, on ₹${esc(r.meta.capital)} capital.</p></div>
+    <div class="card"><h2>Net P&amp;L (Rs) by setting</h2>
+      <table><thead><tr><th>Stop \\ Target</th>${rrs.map((x) => `<th>${esc(x)}x</th>`).join("")}</tr></thead><tbody>${stops.map((s) =>
+        `<tr><td>${esc(s)}%</td>${rrs.map((x) => cell(r.grid.find((g) => g.stop === s && g.rr === x))).join("")}</tr>`).join("")}</tbody></table>
+      <p class="note">${esc(r.positive)} of ${esc(r.cells)} settings were profitable. A real edge shows a broad area of positive cells, not one or two lucky ones.</p></div>
+    <div class="card"><h2>Best on training days, judged on unseen days (stop ${esc(r.best.stop)}%, target ${esc(r.best.rr)}x)</h2>
+      <div class="two">${splitCard("Train", r.train, r.train.days)}${splitCard("Test", r.test, r.test.days)}</div>
+      ${r.overfit_warning ? '<p class="note" style="color:var(--warn)">Warning: results on unseen days are under half of the training results. A common sign of overfitting.</p>' : ""}</div>
+    <p class="note">Free 5-minute data covers only about 60 days, so this is a smoke test, not proof of an edge.</p>`;
+}
+
+// ---------- wiring ----------
+function render() {
+  $("status").textContent = state.note;
+  ["overview", "history", "stocks", "backtest"].forEach((t) => {
+    $("p-" + t).hidden = state.tab !== t;
+    $("t-" + t).setAttribute("aria-selected", String(state.tab === t));
+  });
+  ({ overview: renderOverview, history: renderHistory, stocks: renderStocks, backtest: renderBacktest })[state.tab]();
+}
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (tab) { state.tab = tab.dataset.tab; try { localStorage.setItem("orb_tab", state.tab); } catch (_) {} render(); window.scrollTo(0, 0); return; }
+  const chip = e.target.closest(".chip");
+  if (chip) { state[chip.dataset.filter] = chip.dataset.value; render(); }
+});
+
+async function get(path) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SUPABASE_KEY } });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
 async function load() {
   const btn = $("refresh");
   btn.disabled = true;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/paper_trades?select=*&order=ts.desc&limit=1000`, {
-      headers: { apikey: SUPABASE_KEY },
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, at: Date.now() })); } catch (e) {}
-    render(data, "Updated " + new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-  } catch (e) {
+  const [tr, bt] = await Promise.allSettled([
+    get("paper_trades?select=*&order=ts.desc&limit=2000"),
+    get("backtest_runs?select=*&order=created_at.desc&limit=1"),
+  ]);
+  if (tr.status === "fulfilled") {
+    state.trades = tr.value;
+    state.bt = bt.status === "fulfilled" ? bt.value[0] || null : state.bt;
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ trades: state.trades, bt: state.bt, at: Date.now() })); } catch (_) {}
+    state.note = "Updated " + istClock(new Date());
+  } else {
     let cached = null;
     try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (_) {}
-    if (cached) render(cached.data, "Offline, showing saved data from " + istTime(cached.at));
-    else $("list").innerHTML = '<div class="err">Could not load trades (' + esc(e.message) + '). Check your connection and tap Refresh.</div>';
-  } finally {
-    btn.disabled = false;
+    if (cached) { state.trades = cached.trades; state.bt = cached.bt; state.note = "Offline, showing data saved " + istTime(cached.at); }
+    else { state.note = "Could not load (" + tr.reason.message + "). Tap Refresh."; }
   }
+  btn.disabled = false;
+  render();
 }
 
+try { const t = localStorage.getItem("orb_tab"); if (["overview", "history", "stocks", "backtest"].includes(t)) state.tab = t; } catch (_) {}
 $("refresh").addEventListener("click", load);
+render();
 load();
-setInterval(load, 60000);
+setInterval(() => { if (document.visibilityState === "visible") load(); }, 60000);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

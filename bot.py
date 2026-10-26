@@ -81,12 +81,25 @@ def log_entry(pos):
         res = SB.table("paper_trades").insert({
             "ts": pos.opened_at.isoformat(), "symbol": pos.symbol, "side": pos.side,
             "qty": pos.qty, "entry": round(pos.entry, 2), "reason": "open",
+            "last_price": round(pos.entry, 2), "last_price_ts": pos.opened_at.isoformat(),
             "status": "open", "mode": "paper",
         }).execute()
         return res.data[0]["id"]
     except Exception as e:  # never let logging crash the bot
         print(f"[warn] Supabase open-trade insert failed: {e}")
         return None
+
+
+def log_price(pos, price: float, now):
+    """Save the latest price of an open trade so the dashboard can show live unrealised P&L."""
+    if not SB or pos.row_id is None:
+        return
+    try:
+        SB.table("paper_trades").update(
+            {"last_price": round(price, 2), "last_price_ts": now.isoformat()}
+        ).eq("id", pos.row_id).execute()
+    except Exception as e:  # never let logging crash the bot
+        print(f"[warn] Supabase price update failed: {e}")
 
 
 def log_trade(row: dict, row_id=None):
@@ -201,6 +214,7 @@ def manage_positions(state: State, now: datetime):
         price = last_price(symbol)
         if price is None:
             continue
+        log_price(pos, price, now)
         hit_stop = price <= pos.stop if pos.side == "BUY" else price >= pos.stop
         hit_target = price >= pos.target if pos.side == "BUY" else price <= pos.target
         if hit_stop:
