@@ -32,5 +32,8 @@ The bot can also run as a long-running worker.
 - **Free option:** a GitHub Actions cron is awkward for a long loop; the simplest free route is running it on your own PC/laptop during market hours, or Oracle Cloud's always-free VM.
 - **Paid but easy:** Render background worker (`render.yaml` included, starter plan), Railway, or Fly.io.
 
+## Backtest
+`backtest.py` replays the same rules on ~60 days of free 5-minute data with costs and slippage, tries 15 stop/target settings, and checks the best one on days it never saw. Run it from the Actions tab: backtest -> Run workflow, then open the run and read the summary. It is a smoke test, not proof of an edge.
+
 ## Before any real money
 Paper trade 4-8 weeks and check the Supabase table. Past paper results do not guarantee live results. Going live would need a broker API (Angel One SmartAPI / Upstox) and checking SEBI's current algo-trading rules. Not financial advice.
