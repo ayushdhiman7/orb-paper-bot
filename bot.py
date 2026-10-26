@@ -136,13 +136,14 @@ def compute_opening_range(symbol: str):
     return float(window["High"].max()), float(window["Low"].min())
 
 
-def size_position(price: float, stop: float) -> int:
+def size_position(price: float, stop: float, cash: float = None) -> int:
     risk_cash = CAPITAL * RISK_PER_TRADE_PCT / 100
     per_share_risk = abs(price - stop)
     if per_share_risk <= 0:
         return 0
     qty_by_risk = int(risk_cash // per_share_risk)
-    qty_by_cash = int(CAPITAL // price)       # no leverage, keeps it honest
+    available = CAPITAL if cash is None else cash   # cash NOT already tied up in open positions
+    qty_by_cash = int(max(0.0, available) // price)  # no leverage, keeps it honest
     return max(0, min(qty_by_risk, qty_by_cash))
 
 
@@ -163,7 +164,7 @@ def try_entry(state: State, symbol: str, now: datetime):
         side, stop = "SELL", price * (1 + STOP_LOSS_PCT / 100)
     if not side:
         return
-    qty = size_position(price, stop)
+    qty = size_position(price, stop, state.cash)
     if qty < 1:
         print(f"[skip] {symbol}: price {price:.2f} too high for capital/risk")
         state.done_symbols.add(symbol)
@@ -173,6 +174,7 @@ def try_entry(state: State, symbol: str, now: datetime):
     pos = Position(symbol, side, qty, price, stop, target, now)
     pos.row_id = log_entry(pos)
     state.positions[symbol] = pos
+    state.cash -= qty * price
     state.trades_today += 1
     state.day_pnl -= COST_PER_ORDER
     print(f"[ENTRY] {side} {qty} {symbol} @ {price:.2f} SL {stop:.2f} TP {target:.2f}")
@@ -183,6 +185,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     direction = 1 if pos.side == "BUY" else -1
     pnl = (price - pos.entry) * pos.qty * direction - COST_PER_ORDER
     state.day_pnl += pnl
+    state.cash += pos.qty * pos.entry + (price - pos.entry) * pos.qty * direction  # free the cash
     state.done_symbols.add(symbol)
     print(f"[EXIT] {symbol} @ {price:.2f} ({reason}) net PnL {pnl:+.2f}")
     log_trade({
