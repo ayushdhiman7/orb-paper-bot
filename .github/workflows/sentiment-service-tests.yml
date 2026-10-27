@@ -28,4 +28,4 @@ jobs:
           APP_ENV: test
           TRANSFORMERS_OFFLINE: "1"
           HF_HUB_OFFLINE: "1"
-        run: pytest -q sentiment_service/test_app.py sentiment_service/test_aggregation.py
+        run: pytest -q sentiment_service/test_app.py sentiment_service/test_aggregation.py sentiment_service/test_rss_news.py
