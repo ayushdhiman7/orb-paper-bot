@@ -59,6 +59,17 @@ class ScoreResponse(BaseModel):
     results: list[SentimentResult]
 
 
+class NewsSentimentRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    lookback_minutes: int = Field(default=180, ge=1, le=1440)
+    max_items_per_query: int = Field(default=20, ge=1, le=50)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+
 class ModelRuntime:
     """Lazy-loadable model runtime, separated for testability."""
 
@@ -217,3 +228,50 @@ def score(request: ScoreRequest) -> ScoreResponse:
         scored_at=datetime.now(timezone.utc),
         results=results,
     )
+
+
+@app.post("/research/news-sentiment", dependencies=[Depends(require_api_token)])
+def research_news_sentiment(request: NewsSentimentRequest) -> dict[str, Any]:
+    """Fetch and score Google News RSS for shadow research only; never places trades."""
+    from aggregation import DEFAULT_SYMBOL_ALIASES
+    from news_pipeline import result_to_dict, run_news_sentiment
+
+    if request.symbol not in DEFAULT_SYMBOL_ALIASES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No reviewed company aliases configured for {request.symbol}",
+        )
+    if not runtime.ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sentiment model is unavailable; no sentiment result was produced",
+        )
+    try:
+        aggregated, articles = run_news_sentiment(
+            symbol=request.symbol,
+            runtime=runtime,
+            lookback_minutes=request.lookback_minutes,
+            max_items_per_query=request.max_items_per_query,
+        )
+    except RuntimeError as exc:
+        logger.exception("News sentiment collection failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="News collection or sentiment scoring failed; no trading decision was made",
+        ) from exc
+    except Exception as exc:
+        logger.exception("News sentiment research endpoint failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="News sentiment research failed; no trading decision was made",
+        ) from exc
+    return {
+        "mode": "shadow_research_only",
+        "paper_trading_only": True,
+        "trade_decision_changed": False,
+        "model_id": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "aggregation": result_to_dict(aggregated),
+        "articles": articles,
+    }
