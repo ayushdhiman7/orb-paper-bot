@@ -12,7 +12,7 @@ pip install -r requirements.txt
 uvicorn app:app --reload
 ```
 
-The first startup downloads the Hugging Face model weights. The model is loaded once per service process, not on every request.
+The first startup downloads the public Hugging Face model weights. A Hugging Face token is not normally required for this public model; never commit a token. The model is loaded once per service process, not on every request.\n\n## Google News RSS (no API key)\n\nThe `rss_news.py` adapter fetches public Google News RSS feeds for symbols with a reviewed alias list in `aggregation.py`. It normalizes titles, descriptions, publication timestamps, fetch timestamps, source IDs, links, and explicit symbol matches. It uses only Python's standard library. Keep polling modest and cache results; RSS availability, coverage, and freshness are not guaranteed.\n\nFrom the `sentiment_service` directory, a basic local check can be run with:\n\n```bash\npython -c \'from datetime import datetime, timezone; from rss_news import fetch_google_news; print(fetch_google_news(["RELIANCE.NS"], fetched_at=datetime.now(timezone.utc)))\'\n```\n\nThis performs a network request to Google News RSS. RSS collection is currently a standalone adapter; it is not connected to the ORB entry logic. The next step is to pass eligible items through `/score` and the time-safe aggregation layer in shadow mode.
 
 - `GET /health`: model readiness and version.
 - `POST /score`: batch sentiment scores. Example:
