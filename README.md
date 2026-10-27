@@ -42,3 +42,13 @@ The bot can also run as a long-running worker.
 
 ## Before any real money
 Paper trade 4-8 weeks and check the Supabase table. Past paper results do not guarantee live results. Going live would need a broker API (Angel One SmartAPI / Upstox) and checking SEBI's current algo-trading rules. Not financial advice.
+
+## Automatic weekday runs (EC2)
+
+The bot starts itself Mon-Fri at 09:05 IST through a systemd timer and stops at 15:15 IST. Install once on the server:
+
+```bash
+cd ~/orb-paper-bot && git pull origin main && bash deploy/install.sh
+```
+
+Useful: `systemctl list-timers orb-bot.timer`, `journalctl -u orb-bot -n 50 --no-pager`, `sudo systemctl stop orb-bot` (stop today's run), `sudo systemctl disable --now orb-bot.timer` (turn off). The GitHub Actions workflow is manual-only now, so two bots never trade at once.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Start the ORB paper bot every weekday morning (IST)
+
+[Timer]
+# Starts before the 09:15 open; the bot waits for the opening range. Exits itself at 15:15.
+OnCalendar=Mon..Fri 09:05 Asia/Kolkata
+Persistent=false
+Unit=orb-bot.service
+
+[Install]
+WantedBy=timers.target

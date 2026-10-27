@@ -1,0 +1,19 @@
+[Unit]
+Description=ORB paper-trading bot (one trading day, paper only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+# Keys (SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY ...) come from .env. The leading "-" means: fine if missing.
+EnvironmentFile=-__DIR__/.env
+Environment=ONE_DAY=1
+Environment=LLM_MODE=shadow
+Environment=CAPITAL=4000
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__DIR__/.venv/bin/python -u bot.py
+# The bot ends itself at 15:15 IST. No auto-restart: a restart would forget open paper positions.
+Restart=no
+TimeoutStopSec=30

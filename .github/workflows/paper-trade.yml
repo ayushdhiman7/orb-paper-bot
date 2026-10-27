@@ -1,12 +1,7 @@
 name: paper-trade-session
 
 on:
-  schedule:
-    # IST = UTC + 5:30, Monday to Friday. Several start times because GitHub often drops or delays
-    # scheduled runs. The concurrency guard below keeps it to one session; extras exit right away.
-    - cron: "0 4 * * 1-5"    # 09:30 IST
-    - cron: "30 4 * * 1-5"   # 10:00 IST
-    - cron: "30 5 * * 1-5"   # 11:00 IST
+  # The weekday schedule now runs on the EC2 server (deploy/). No cron here, so two bots never trade at once.
   workflow_dispatch: {}   # lets you start it by hand from the GitHub mobile app
 
 concurrency:
