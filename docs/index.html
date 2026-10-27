@@ -78,7 +78,72 @@
   .empty, .err { color: var(--muted); text-align: center; padding: 22px 8px; font-size: .92rem; }
   .err { color: var(--neg); }
   .note { color: var(--muted); font-size: .75rem; margin: 10px 0 0; }
-  footer { color: var(--muted); font-size: .72rem; text-align: center; margin-top: 6px; }
+  footer { color: var(--muted); font-size: .72rem; text-align: center; margin: 24px 0 8px; }
+
+  /* Responsive trading-terminal refresh */
+  body { max-width: 1280px; padding: 0 24px max(32px, env(safe-area-inset-bottom)); }
+  .top { padding-bottom: 14px; border-bottom: 1px solid var(--line); background: rgba(13,17,23,.94); backdrop-filter: blur(14px); }
+  .bar { min-height: 42px; }
+  h1 { font-size: 1.35rem; letter-spacing: -.025em; }
+  .status { margin: 4px 0 14px; }
+  .tabs { max-width: 620px; gap: 6px; }
+  .tab { padding: 10px 12px; transition: background .15s ease, color .15s ease; }
+  .tab:hover { color: var(--text); background: rgba(255,255,255,.035); }
+  .btn { padding: 9px 15px; transition: border-color .15s ease, background .15s ease; }
+  .btn:hover { border-color: var(--accent); background: var(--surface2); }
+  .panel { padding-top: 22px; }
+  .hero { margin: 0; padding: 8px 0; }
+  .hero .k { font-size: .75rem; letter-spacing: .09em; }
+  .hero .v { font-size: clamp(2.5rem, 4vw, 3.5rem); letter-spacing: -.045em; }
+  .tiles { gap: 12px; margin-bottom: 18px; }
+  .tile { padding: 15px 16px; border-radius: 14px; transition: border-color .15s ease, transform .15s ease; }
+  .tile:hover { border-color: #3c4654; transform: translateY(-1px); }
+  .tile .k { letter-spacing: .07em; }
+  .tile .v { font-size: clamp(1rem, 1.5vw, 1.25rem); margin-top: 5px; }
+  .card { padding: 18px 20px; margin-bottom: 16px; border-radius: 16px; }
+  .card h2 { font-size: .74rem; letter-spacing: .09em; margin-bottom: 14px; }
+  .row { padding: 13px 0; }
+  .sym { letter-spacing: -.01em; }
+  .badge { padding: 2px 9px; }
+  .meta { font-size: .78rem; }
+  .chip { padding: 7px 13px; transition: border-color .15s ease, background .15s ease; }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+  table { min-width: 360px; }
+  th, td { padding: 11px 9px; }
+  .verdict { padding: 15px 18px; }
+  .note { line-height: 1.55; }
+  @media (min-width: 900px) {
+    #p-overview { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    #p-overview > .hero { grid-column: span 5; align-self: center; }
+    #p-overview > .tiles { grid-column: span 7; margin: 0; }
+    #p-overview > .card { margin: 0; min-width: 0; }
+    #p-overview > .open-card { grid-column: 1 / -1; }
+    #p-overview > .chart-card, #p-overview > .recent-card { grid-column: span 6; }
+    #p-overview .row { grid-template-columns: minmax(0, 1fr) auto; }
+    #p-history, #p-stocks, #p-backtest { max-width: 1100px; }
+    #p-backtest .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    #p-backtest .two { gap: 14px; }
+  }
+  @media (max-width: 700px) {
+    body { padding-left: 14px; padding-right: 14px; }
+    .top { padding-bottom: 10px; }
+    h1 { font-size: 1.15rem; }
+    .tabs { gap: 3px; }
+    .tab { padding: 9px 3px; font-size: .8rem; }
+    .panel { padding-top: 16px; }
+    .tiles { gap: 7px; }
+    .tile { padding: 10px 9px; }
+    .tile .k { font-size: .63rem; }
+    .tile .v { font-size: .92rem; white-space: normal; overflow-wrap: anywhere; }
+    .card { padding: 14px; border-radius: 13px; }
+    .row { gap: 3px 8px; }
+    .badge { margin-left: 3px; padding: 1px 6px; }
+    th, td { padding: 9px 6px; }
+    .two { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -182,7 +247,7 @@ function renderOverview() {
   let openCard = "";
   if (open.length) {
     const latest = open.map((t) => t.last_price_ts).filter(Boolean).sort().pop();
-    openCard = `<div class="card"><h2>Open now</h2>${open.map((t) => {
+    openCard = `<div class="card open-card"><h2>Open positions</h2>${open.map((t) => {
       const u = unrealised(t), last = num(t.last_price);
       return `<div class="row">
         <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge live">OPEN</span></div>
@@ -201,8 +266,8 @@ function renderOverview() {
       <div class="tile"><div class="k">Win rate</div><div class="v">${s.winRate == null ? "-" : Math.round(s.winRate) + "%"}</div></div>
     </div>
     ${openCard}
-    <div class="card"><h2>Cumulative P&amp;L</h2>${lineChart(closed)}</div>
-    <div class="card"><h2>Recent trades</h2>${closed.length ? [...closed].reverse().slice(0, 8).map(tradeRow).join("") : emptyBox("No closed trades yet. The bot runs on weekdays and some days it takes no trade.")}</div>`;
+    <div class="card chart-card"><h2>Cumulative P&amp;L</h2>${lineChart(closed)}</div>
+    <div class="card recent-card"><h2>Recent trades</h2>${closed.length ? [...closed].reverse().slice(0, 8).map(tradeRow).join("") : emptyBox("No closed trades yet. The bot runs on weekdays and some days it takes no trade.")}</div>`;
 }
 
 // ---------- History ----------
