@@ -26,6 +26,8 @@ jobs:
       - run: python -u bot.py
         env:
           ONE_DAY: "1"
+          LLM_MODE: "shadow"   # off | shadow (record AI opinion, trade anyway) | gate (skip what the AI rejects)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CAPITAL: "4000"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

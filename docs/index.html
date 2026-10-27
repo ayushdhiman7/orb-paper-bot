@@ -109,7 +109,7 @@ const SUPABASE_URL = "https://gbqmvnekxsckzjzcorac.supabase.co";
 const SUPABASE_KEY = "sb_publishable_xqMJstPMLis5zzOIxityFw_Fz32fdv3";
 const CACHE_KEY = "orb_cache_v2";
 
-const state = { trades: [], bt: null, tab: "overview", range: "30", side: "all", reason: "all", note: "Loading..." };
+const state = { trades: [], bt: null, lab: null, tab: "overview", range: "30", side: "all", reason: "all", note: "Loading..." };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -144,11 +144,23 @@ function stats(trades) {
 function tradeRow(t) {
   const pnl = Number(t.pnl);
   return `<div class="row">
-    <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge">${esc(t.reason || "")}</span></div>
+    <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge">${esc(t.reason || "")}</span>${aiBadge(t)}</div>
     <div class="amt ${cls(pnl)}">${inr(pnl)}</div>
     <div class="meta">${esc(t.qty)} sh &middot; ${Number(t.entry).toFixed(2)} &rarr; ${Number(t.exit).toFixed(2)}</div>
     <div class="meta r">${esc(istTime(t.ts))}</div>
   </div>`;
+}
+function aiBadge(t) {
+  return t.llm_decision ? `<span class="badge" title="${esc(t.llm_reason || "")}">AI: ${esc(t.llm_decision)}</span>` : "";
+}
+function aiCard(closed) {
+  const g = { take: [], skip: [] };
+  closed.forEach((t) => { if (g[t.llm_decision]) g[t.llm_decision].push(t); });
+  if (!g.take.length && !g.skip.length) return "";
+  const row = (label, arr) => { const s = stats(arr); return `<tr><td>${label}</td><td>${s.n}</td><td>${s.winRate == null ? "-" : Math.round(s.winRate) + "%"}</td><td class="${cls(arr.length ? s.total : null)}">${arr.length ? inr(s.total) : "-"}</td></tr>`; };
+  return `<div class="card"><h2>AI second opinion</h2>
+    <table><thead><tr><th>AI said</th><th>Trades</th><th>Win</th><th>Net P&amp;L</th></tr></thead><tbody>${row("Take", g.take)}${row("Skip", g.skip)}</tbody></table>
+    <p class="note">The AI only advises: trades are taken either way unless the bot is in gate mode. Wait for 30 or more trades before judging whether it adds anything.</p></div>`;
 }
 function emptyBox(msg) { return `<div class="empty">${esc(msg)}</div>`; }
 
@@ -185,7 +197,7 @@ function renderOverview() {
     openCard = `<div class="card"><h2>Open now</h2>${open.map((t) => {
       const u = unrealised(t), last = num(t.last_price);
       return `<div class="row">
-        <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge live">OPEN</span></div>
+        <div><span class="sym">${esc(tick(t.symbol))}</span><span class="badge">${esc(t.side)}</span><span class="badge live">OPEN</span>${aiBadge(t)}</div>
         <div class="amt ${cls(u)}">${u == null ? "-" : inr(u)}</div>
         <div class="meta">${esc(t.qty)} sh &middot; in ${Number(t.entry).toFixed(2)} &middot; now ${last == null ? "-" : last.toFixed(2)}</div>
         <div class="meta r">${esc(istTime(t.ts))}</div></div>`;
@@ -271,6 +283,7 @@ function renderStocks() {
   $("p-stocks").innerHTML = `
     ${chips("side", "Side", [["all", "All"], ["BUY", "Buy"], ["SELL", "Sell"]])}
     ${chips("reason", "Exit", [["all", "All"]].concat(reasons.map((r) => [r, r])))}
+    ${aiCard(closed)}
     <div class="card"><h2>By stock</h2>${table.length ? `<table><thead><tr><th>Stock</th><th>Trades</th><th>Win</th><th>Net P&amp;L</th></tr></thead><tbody>${table.map((r) =>
       `<tr><td class="sym">${esc(r.k)}</td><td>${r.n}</td><td>${Math.round(r.winRate)}%</td><td class="${cls(r.total)}">${inr(r.total)}</td></tr>`).join("")}</tbody></table>` : emptyBox("No closed trades match these filters.")}</div>
     <div class="card"><h2>Trades (${rows.length})</h2>${rows.length ? [...rows].reverse().slice(0, 50).map(tradeRow).join("") : emptyBox("No trades to list.")}</div>`;
@@ -295,10 +308,20 @@ function splitCard(title, m, days) {
     <div class="kv"><span>Per trade</span><span class="${cls(m.exp)}">${inr(m.exp)}</span></div>
     <div class="kv"><span>Total</span><span class="${cls(m.total)}">${inr(m.total)}</span></div></div>`;
 }
+function labCard(row) {
+  if (!row || !row.result || !Array.isArray(row.result.variants)) return "";
+  const r = row.result, g = r.gross || {}, c = r.with_costs || {};
+  const rows = r.variants.map((x) => `<tr><td>${esc(x.name)}<div class="meta">${esc(x.verdict)} &middot; ${esc(x.best.stop)}% / ${esc(x.best.rr)}x</div></td>
+    <td class="${cls(x.train.total)}">${Math.round(x.train.total)}</td><td class="${cls(x.test.total)}">${Math.round(x.test.total)}</td><td>${esc(x.test.n)}</td></tr>`).join("");
+  return `<div class="card"><h2>Strategy lab (${esc(r.variants.length)} variants)</h2>
+    <p class="note" style="margin:0 0 10px">Before costs the baseline made ${esc(inr(g.total))} over ${esc(g.n)} trades (${esc(inr(g.exp))} per trade). After costs: ${esc(inr(c.total))}.</p>
+    <table><thead><tr><th>Variant</th><th>Train</th><th>Test</th><th>Trades</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">Run ${esc(istTime(row.created_at))}. ${esc(r.meta.tried)} combinations were tried on the same days, so a good-looking result can be luck. Confirm with fresh paper trading.</p></div>`;
+}
 function renderBacktest() {
-  const row = state.bt, el = $("p-backtest");
+  const row = state.bt, el = $("p-backtest"), lab = labCard(state.lab);
   if (!row || !row.result) {
-    el.innerHTML = `<div class="card">${emptyBox("No backtest saved yet. On GitHub open Actions, choose backtest, tap Run workflow, then come back here.")}</div>`;
+    el.innerHTML = lab || `<div class="card">${emptyBox("No backtest saved yet. On GitHub open Actions, choose backtest, tap Run workflow, then come back here.")}</div>`;
     return;
   }
   const r = row.result, b = r.baseline, v = String(b.verdict || "");
@@ -322,7 +345,7 @@ function renderBacktest() {
     <div class="card"><h2>Best on training days, judged on unseen days (stop ${esc(r.best.stop)}%, target ${esc(r.best.rr)}x)</h2>
       <div class="two">${splitCard("Train", r.train, r.train.days)}${splitCard("Test", r.test, r.test.days)}</div>
       ${r.overfit_warning ? '<p class="note" style="color:var(--warn)">Warning: results on unseen days are under half of the training results. A common sign of overfitting.</p>' : ""}</div>
-    <p class="note">Free 5-minute data covers only about 60 days, so this is a smoke test, not proof of an edge.</p>`;
+    <p class="note">Free 5-minute data covers only about 60 days, so this is a smoke test, not proof of an edge.</p>` + lab;
 }
 
 // ---------- wiring ----------
@@ -351,17 +374,20 @@ async function load() {
   btn.disabled = true;
   const [tr, bt] = await Promise.allSettled([
     get("paper_trades?select=*&order=ts.desc&limit=2000"),
-    get("backtest_runs?select=*&order=created_at.desc&limit=1"),
+    get("backtest_runs?select=*&order=created_at.desc&limit=10"),
   ]);
   if (tr.status === "fulfilled") {
     state.trades = tr.value;
-    state.bt = bt.status === "fulfilled" ? bt.value[0] || null : state.bt;
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ trades: state.trades, bt: state.bt, at: Date.now() })); } catch (_) {}
+    if (bt.status === "fulfilled") {
+      state.bt = bt.value.find((x) => x.result && x.result.kind !== "lab") || null;
+      state.lab = bt.value.find((x) => x.result && x.result.kind === "lab") || null;
+    }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ trades: state.trades, bt: state.bt, lab: state.lab, at: Date.now() })); } catch (_) {}
     state.note = "Updated " + istClock(new Date());
   } else {
     let cached = null;
     try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (_) {}
-    if (cached) { state.trades = cached.trades; state.bt = cached.bt; state.note = "Offline, showing data saved " + istTime(cached.at); }
+    if (cached) { state.trades = cached.trades; state.bt = cached.bt; state.lab = cached.lab || null; state.note = "Offline, showing data saved " + istTime(cached.at); }
     else { state.note = "Could not load (" + tr.reason.message + "). Tap Refresh."; }
   }
   btn.disabled = false;
