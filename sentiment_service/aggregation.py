@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Literal
-from urllib.parse import urlparse
 
 SourceType = Literal["news", "social"]
 
@@ -181,7 +180,15 @@ def aggregate_sentiment(
     seen_hashes: set[str] = set()
     warnings: set[str] = set()
 
-    for item in items:
+    # Prefer the newest version when identical content appears in multiple feeds.
+    def newest_first(item: SentimentItem) -> datetime:
+        try:
+            return _utc(item.published_at, "published_at")
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    ordered_items = sorted(items, key=newest_first, reverse=True)
+    for item in ordered_items:
         digest = text_digest(item.text)
         try:
             published = _utc(item.published_at, "published_at")
