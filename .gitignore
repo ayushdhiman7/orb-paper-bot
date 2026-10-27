@@ -4,3 +4,4 @@ logs/
 __pycache__/
 *.pyc
 trades.csv
+.angel_cache/
