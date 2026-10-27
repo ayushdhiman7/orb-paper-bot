@@ -134,3 +134,28 @@ def test_item_cap_limits_source_influence():
     assert result.news.item_count == 2
     assert "news_item_cap_applied" in result.warnings
     assert sum(d.reason == "source_item_cap" for d in result.decisions) == 3
+
+
+
+def test_deduplication_keeps_newest_copy_regardless_of_input_order():
+    older = item(
+        "older",
+        source="news",
+        text="Company raises quarterly guidance https://example.com/old",
+        published=NOW - timedelta(minutes=25),
+        fetched=NOW - timedelta(minutes=20),
+    )
+    newer = item(
+        "newer",
+        source="social",
+        text="COMPANY raises quarterly guidance https://example.com/new",
+        published=NOW - timedelta(minutes=2),
+        fetched=NOW - timedelta(minutes=1),
+    )
+    result = aggregate_sentiment(
+        symbol="RELIANCE.NS", signal_time=NOW, items=[older, newer]
+    )
+    by_id = {decision.item_id: decision for decision in result.decisions}
+    assert by_id["newer"].accepted is True
+    assert by_id["older"].accepted is False
+    assert by_id["older"].reason == "duplicate_text"
