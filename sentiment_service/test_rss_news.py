@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from unittest.mock import Mock
+from urllib.parse import unquote
 
 import pytest
 
@@ -57,7 +58,7 @@ def test_fetch_uses_mocked_opener_and_only_reviewed_symbols():
     assert opener.call_count == 1
     request = opener.call_args.args[0]
     assert request.full_url.startswith("https://news.google.com/rss/search?")
-    assert "Reliance" in request.full_url or "RELIANCE" in request.full_url
+    assert "RELIANCE" in unquote(request.full_url).upper()
 
 
 def test_fetch_validates_limits():
