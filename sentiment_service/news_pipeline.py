@@ -17,7 +17,7 @@ from rss_news import NewsItem, fetch_google_news
 def run_news_sentiment(
     *,
     symbol: str,
-    signal_time: datetime,
+    signal_time: datetime | None = None,
     runtime: ModelRuntime,
     lookback_minutes: int = 180,
     max_items_per_query: int = 20,
@@ -29,7 +29,7 @@ def run_news_sentiment(
     excluded by aggregation. Returns aggregation plus auditable per-article
     metadata (not raw article text).
     """
-    if signal_time.tzinfo is None or signal_time.utcoffset() is None:
+    if signal_time is not None and (signal_time.tzinfo is None or signal_time.utcoffset() is None):
         raise ValueError("signal_time must be timezone-aware")
     if not runtime.ready:
         raise RuntimeError("Sentiment model is not available")
@@ -39,10 +39,16 @@ def run_news_sentiment(
         fetched_at=fetched_at,
         max_items_per_query=max_items_per_query,
     )
+    # For live shadow collection, set the decision timestamp after fetching.
+    # For historical research, callers must supply an explicit signal timestamp.
+    decision_time = signal_time or datetime.now(timezone.utc)
+    if decision_time.tzinfo is None or decision_time.utcoffset() is None:
+        raise ValueError("signal_time must be timezone-aware")
+    decision_time = decision_time.astimezone(timezone.utc)
     eligible = [
         item for item in items
-        if item.published_at <= signal_time.astimezone(timezone.utc)
-        and item.fetched_at <= signal_time.astimezone(timezone.utc)
+        if item.published_at <= decision_time
+        and item.fetched_at <= decision_time
     ]
     inputs = [TextInput(id=item.item_id[:128], text=item.text) for item in eligible]
     scored = runtime.score(inputs) if inputs else []
@@ -92,7 +98,7 @@ def run_news_sentiment(
         })
     result = aggregate_sentiment(
         symbol=symbol,
-        signal_time=signal_time,
+        signal_time=decision_time,
         items=normalized,
         lookback_minutes=lookback_minutes,
     )
