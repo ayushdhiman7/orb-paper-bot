@@ -1,18 +1,24 @@
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-# Ensure test imports are not treated as production deployments.
+# Ensure tests never download real model weights or require production credentials.
 os.environ["APP_ENV"] = "test"
 os.environ.pop("SENTIMENT_API_TOKEN", None)
 
 import app as sentiment_app
 
 
-def test_health_reports_unavailable_without_model():
+@pytest.fixture(autouse=True)
+def no_model_download(monkeypatch):
     sentiment_app.runtime.tokenizer = None
     sentiment_app.runtime.model = None
     sentiment_app.runtime.error = "test model unavailable"
+    monkeypatch.setattr(sentiment_app.runtime, "load", lambda: None)
+
+
+def test_health_reports_unavailable_without_model():
     with TestClient(sentiment_app.app) as client:
         response = client.get("/health")
     assert response.status_code == 200
@@ -21,11 +27,7 @@ def test_health_reports_unavailable_without_model():
 
 
 def test_score_returns_503_when_model_unavailable():
-    sentiment_app.runtime.tokenizer = None
-    sentiment_app.runtime.model = None
     with TestClient(sentiment_app.app) as client:
-        # Avoid loading real weights during tests.
-        sentiment_app.runtime.load = lambda: None
         response = client.post("/score", json={"items": [{"text": "Strong results"}]})
     assert response.status_code == 503
     assert "no sentiment result" in response.json()["detail"]
@@ -33,7 +35,6 @@ def test_score_returns_503_when_model_unavailable():
 
 def test_blank_text_is_rejected():
     with TestClient(sentiment_app.app) as client:
-        sentiment_app.runtime.load = lambda: None
         response = client.post("/score", json={"items": [{"text": "   "}]})
     assert response.status_code == 422
 
