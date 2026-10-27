@@ -1,0 +1,31 @@
+name: sentiment-service-tests
+
+on:
+  push:
+    branches:
+      - feature/fintwitbert-sentiment-service
+  pull_request:
+    paths:
+      - "sentiment_service/**"
+      - ".github/workflows/sentiment-service-tests.yml"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sentiment_service/requirements.txt
+      - name: Install service dependencies
+        run: pip install -r sentiment_service/requirements.txt
+      - name: Run unit tests without downloading model weights
+        env:
+          APP_ENV: test
+          TRANSFORMERS_OFFLINE: "1"
+          HF_HUB_OFFLINE: "1"
+        run: pytest -q sentiment_service/test_app.py sentiment_service/test_aggregation.py
