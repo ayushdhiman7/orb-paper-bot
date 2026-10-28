@@ -35,6 +35,10 @@ ONE_DAY = os.getenv("ONE_DAY", "0") == "1"   # exit after today's session (used 
 # AI second opinion (Gemini). "off" = never ask, "shadow" = ask and record the answer but trade anyway (default),
 # "gate" = skip trades the AI votes against. Needs the GEMINI_API_KEY secret; without it nothing changes.
 LLM_MODE = os.getenv("LLM_MODE", "shadow").lower()
+# AI exits for OPEN trades: "off" (default), "shadow" (ask, print and record, never act) or "act" (the AI may close
+# a trade early). The fixed stop, target, 15:15 square-off and daily loss cap always stay in force either way.
+AI_EXITS = os.getenv("AI_EXITS", "off").lower()
+AI_CHECK_SECONDS = int(os.getenv("AI_CHECK_SECONDS", "300"))   # how often each open trade is reviewed
 
 MARKET_OPEN = dtime(9, 15)
 RANGE_END = dtime(9, 30)      # opening range = 9:15 to 9:30
@@ -55,6 +59,8 @@ class Position:
     row_id: object = None    # Supabase row id of this trade while it is open
     llm_decision: str = None  # AI second opinion: "take" or "skip" (None if not asked)
     llm_reason: str = None
+    peak: float = None        # best price seen since entry (for BUY the highest, for SELL the lowest)
+    last_ai_check: datetime = None
 
 
 @dataclass
@@ -191,6 +197,34 @@ def ask_ai(symbol, side, price, stop, target, rng, now):
         return None
 
 
+def ask_ai_exit(pos, price, now):
+    """Fact sheet about an open trade, sent to the AI for a hold/exit opinion. Never raises; None means hold."""
+    if not os.getenv("GEMINI_API_KEY", "").strip():
+        return None
+    try:
+        direction = 1 if pos.side == "BUY" else -1
+        risk = abs(pos.entry - pos.stop) or 1e-9
+        pnl = (price - pos.entry) * pos.qty * direction
+        peak = pos.peak if pos.peak is not None else price
+        ctx = {"symbol": pos.symbol, "side": pos.side, "time_ist": f"{now:%H:%M}",
+               "minutes_held": int((now - pos.opened_at).total_seconds() // 60),
+               "minutes_until_forced_close": max(0, int((datetime.combine(now.date(), SQUARE_OFF, tzinfo=IST) - now).total_seconds() // 60)),
+               "entry_price": round(pos.entry, 2), "current_price": round(price, 2),
+               "stop": round(pos.stop, 2), "target": round(pos.target, 2),
+               "unrealised_pnl_rupees": round(pnl, 2),
+               "unrealised_pnl_in_risk_units": round((price - pos.entry) * direction / risk, 2),
+               "best_price_since_entry": round(peak, 2),
+               "best_profit_in_risk_units": round((peak - pos.entry) * direction / risk, 2),
+               "exit_brokerage_rupees": COST_PER_ORDER}
+        df = fetch_candles(pos.symbol)
+        if not df.empty:
+            ctx["last_12_five_min_closes"] = [round(float(x), 2) for x in df["Close"].resample("5min").last().dropna().tail(12)]
+        return llm_gate.review_exit(ctx)
+    except Exception as e:  # the AI is optional: never let it break trading
+        print(f"[warn] AI exit review skipped: {type(e).__name__}")
+        return None
+
+
 def try_entry(state: State, symbol: str, now: datetime):
     if symbol in state.positions or symbol in state.done_symbols:
         return
@@ -233,7 +267,7 @@ def try_entry(state: State, symbol: str, now: datetime):
     print(f"[ENTRY] {side} {qty} {symbol} @ {price:.2f} SL {stop:.2f} TP {target:.2f}")
 
 
-def close_position(state: State, symbol: str, price: float, reason: str, now: datetime):
+def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
     pos = state.positions.pop(symbol)
     direction = 1 if pos.side == "BUY" else -1
     pnl = (price - pos.entry) * pos.qty * direction - COST_PER_ORDER
@@ -245,6 +279,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
         "ts": now.isoformat(), "symbol": symbol, "side": pos.side, "qty": pos.qty,
         "entry": round(pos.entry, 2), "exit": round(price, 2),
         "pnl": round(pnl, 2), "reason": reason, "mode": "paper",
+        **({"llm_reason": ((pos.llm_reason + " | ") if pos.llm_reason else "") + "EXIT: " + note} if note else {}),
     }, row_id=pos.row_id)
 
 
@@ -255,12 +290,23 @@ def manage_positions(state: State, now: datetime):
         if price is None:
             continue
         log_price(pos, price, now)
+        better = (lambda a, b: a > b) if pos.side == "BUY" else (lambda a, b: a < b)
+        if pos.peak is None or better(price, pos.peak):
+            pos.peak = price
         hit_stop = price <= pos.stop if pos.side == "BUY" else price >= pos.stop
         hit_target = price >= pos.target if pos.side == "BUY" else price <= pos.target
         if hit_stop:
             close_position(state, symbol, price, "stop_loss", now)
         elif hit_target:
             close_position(state, symbol, price, "target", now)
+        elif AI_EXITS in ("shadow", "act") and now.time() < SQUARE_OFF and (
+                pos.last_ai_check is None or (now - pos.last_ai_check).total_seconds() >= AI_CHECK_SECONDS):
+            pos.last_ai_check = now
+            view = ask_ai_exit(pos, price, now)
+            if view:
+                print(f"[AI-EXIT?] {symbol}: {view['decision']} - {view['reason']}")
+                if view["decision"] == "exit" and AI_EXITS == "act":
+                    close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
 
 
 def check_daily_cap(state: State):

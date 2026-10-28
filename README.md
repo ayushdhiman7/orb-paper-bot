@@ -52,3 +52,12 @@ cd ~/orb-paper-bot && git pull origin main && bash deploy/install.sh
 ```
 
 Useful: `systemctl list-timers orb-bot.timer`, `journalctl -u orb-bot -n 50 --no-pager`, `sudo systemctl stop orb-bot` (stop today's run), `sudo systemctl disable --now orb-bot.timer` (turn off). The GitHub Actions workflow is manual-only now, so two bots never trade at once.
+
+## AI exits (optional)
+
+By default a trade only closes at its stop, its target or the 15:15 square-off. Set `AI_EXITS` in `.env` to let Gemini watch open trades every `AI_CHECK_SECONDS` (default 300) and answer hold or exit:
+- `AI_EXITS=off` (default): never asked.
+- `AI_EXITS=shadow`: asked and printed in the log, never acted on.
+- `AI_EXITS=act`: an "exit" answer closes the trade at market (reason `ai_exit`, the AI's sentence is saved on the trade).
+
+The AI can only close a trade earlier. It cannot widen the stop or hold past 15:15, and if the API fails the trade is simply held.

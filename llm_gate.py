@@ -27,6 +27,19 @@ Trade data:
 {ctx}"""
 
 
+EXIT_PROMPT = """You are a cautious intraday-trading risk manager for a PAPER-trading bot on Indian (NSE) stocks.
+The bot already holds the position below. Every few minutes you decide: "hold" (keep it open, the fixed stop
+and target stay in place) or "exit" (close it at the current price now).
+Guidance: do not let a decent open profit turn into a loss; do not exit a position that is merely a little
+down while the setup is still intact (the stop loss already protects the downside); every exit costs brokerage;
+everything is closed automatically at 15:15 IST. Weigh momentum from the recent closes, how much profit has been
+given back from the peak, and how much time is left. Use only the data given. Do not invent news or facts.
+Reply with JSON only, in this exact shape:
+{{"decision": "hold" or "exit", "reason": "<one short sentence>"}}
+
+Position data:
+{ctx}"""
+
 def _models():
     env = os.getenv("GEMINI_MODEL", "").strip()
     models = [env] if env else list(DEFAULT_MODELS)
@@ -44,7 +57,7 @@ def _post(model, body, key):
         return json.loads(r.read().decode())
 
 
-def _parse(text):
+def _parse(text, allowed=("take", "skip")):
     """Pull {"decision","reason"} out of the model's text. Returns None if unreadable."""
     if not text:
         return None
@@ -54,18 +67,17 @@ def _parse(text):
     except Exception:
         return None
     decision = str(data.get("decision", "")).strip().lower()
-    if decision not in ("take", "skip"):
+    if decision not in allowed:
         return None
     return {"decision": decision, "reason": str(data.get("reason", ""))[:200]}
 
 
-def review(ctx):
-    """Ask Gemini for take/skip on one breakout. ctx is a small dict of facts. Returns dict or None."""
+def _ask(prompt, allowed):
+    """Send one prompt, try model names in turn. Returns {"decision","reason","model"} or None. Never raises."""
     global _working
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         return None
-    prompt = PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str))
     for model in _models():
         body = {"contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
@@ -73,7 +85,7 @@ def review(ctx):
             try:
                 resp = _post(model, body, key)
                 text = resp["candidates"][0]["content"]["parts"][0]["text"]
-                out = _parse(text)
+                out = _parse(text, allowed)
                 if out:
                     _working = model
                     out["model"] = model
@@ -90,3 +102,13 @@ def review(ctx):
                 print(f"[warn] AI call failed on {model}: {type(e).__name__}")
                 break
     return None
+
+
+def review(ctx):
+    """Entry opinion: take or skip this breakout. ctx is a small dict of facts. Returns dict or None."""
+    return _ask(PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)), ("take", "skip"))
+
+
+def review_exit(ctx):
+    """Exit opinion on an OPEN trade: hold or exit now. Returns dict or None (None means: keep holding)."""
+    return _ask(EXIT_PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)), ("hold", "exit"))
