@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 import llm_gate
+from angel_feed import AngelFeed
 
 warnings.filterwarnings("ignore")  # yfinance/pandas deprecation noise buries the real log lines
 
@@ -39,6 +40,11 @@ LLM_MODE = os.getenv("LLM_MODE", "shadow").lower()
 # a trade early). The fixed stop, target, 15:15 square-off and daily loss cap always stay in force either way.
 AI_EXITS = os.getenv("AI_EXITS", "off").lower()
 AI_CHECK_SECONDS = int(os.getenv("AI_CHECK_SECONDS", "300"))   # how often each open trade is reviewed
+
+# Price source: "yahoo" (default, ~15 min late) or "angel" (Angel One live quotes, falls back to Yahoo on any problem).
+DATA_SOURCE = os.getenv("DATA_SOURCE", "yahoo").lower()
+ANGEL_POLL_SECONDS = int(os.getenv("ANGEL_POLL_SECONDS", "5"))
+FEED = None   # set in run() when DATA_SOURCE=angel and login works
 
 MARKET_OPEN = dtime(9, 15)
 RANGE_END = dtime(9, 30)      # opening range = 9:15 to 9:30
@@ -145,12 +151,20 @@ def fetch_candles(symbol: str):
 
 
 def last_price(symbol: str):
-    df = fetch_candles(symbol)
+    if FEED is not None:
+        p = FEED.last(symbol, datetime.now(IST))
+        if p is not None:
+            return p          # live Angel One price
+    df = fetch_candles(symbol)   # Yahoo (also the fallback when the live feed has no fresh price)
     return None if df.empty else float(df["Close"].iloc[-1])
 
 
 # ---------------- Strategy ----------------
 def compute_opening_range(symbol: str):
+    if FEED is not None:
+        r = FEED.opening_range(symbol)
+        if r:
+            return r          # built from live samples taken 9:15-9:30
     df = fetch_candles(symbol)
     if df.empty:
         return None
@@ -317,11 +331,23 @@ def check_daily_cap(state: State):
 
 # ---------------- Main loop ----------------
 def run():
+    global FEED
     state = State()
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
+    if DATA_SOURCE == "angel":
+        feed = AngelFeed(SYMBOLS)
+        if feed.login():
+            FEED = feed
+            print(f"[data] Angel One live feed on for {feed.symbols}; Yahoo stays as fallback")
+        else:
+            print(f"[warn] Angel One feed off ({feed.last_error}); using Yahoo")
     while True:
         now = datetime.now(IST)
         t = now.time()
+        if FEED is not None and now.weekday() < 5 and MARKET_OPEN <= t <= MARKET_CLOSE:
+            n = FEED.poll(now)
+            if n == 0 and FEED.last_error and now.second < ANGEL_POLL_SECONDS:
+                print(f"[warn] Angel One poll: {FEED.last_error}")
 
         if ONE_DAY and (now.weekday() >= 5 or t > MARKET_CLOSE):
             print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
@@ -332,7 +358,7 @@ def run():
             if t > MARKET_CLOSE and state.trades_today:
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
                 state = State()  # reset for next day
-            time.sleep(300)
+            time.sleep(30 if FEED is not None and t < MARKET_OPEN and now.weekday() < 5 else 300)
             continue
 
         if t >= SQUARE_OFF:
@@ -356,7 +382,7 @@ def run():
                 for sym in SYMBOLS:
                     try_entry(state, sym, now)
 
-        time.sleep(POLL_SECONDS)
+        time.sleep(ANGEL_POLL_SECONDS if FEED is not None else POLL_SECONDS)
 
 
 if __name__ == "__main__":

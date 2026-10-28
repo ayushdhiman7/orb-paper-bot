@@ -67,3 +67,7 @@ The AI can only close a trade earlier. It cannot widen the stop or hold past 15:
 A systemd timer (`orb-update.timer`) checks GitHub every 5 minutes. When `main` has new commits it pulls them (fast-forward only), installs new packages if `requirements.txt` changed, checks that the Python files compile (rolls back if not) and refreshes the dashboard files in Nginx. It never restarts the bot: the bot starts fresh each weekday 09:05 IST and uses the latest code then. No inbound SSH is needed, so port 22 can stay closed.
 
 Install or refresh once: `cd ~/orb-paper-bot && git pull origin main && bash deploy/install.sh`. Watch it: `journalctl -u orb-update -n 20 --no-pager`. If you change files in `deploy/*.service` or `*.timer`, run `bash deploy/install.sh` again.
+
+## Angel One live prices (optional)
+
+Yahoo prices are about 15 minutes late. Set `DATA_SOURCE=angel` in `.env` and the bot asks Angel One for the live price of all stocks in one call every `ANGEL_POLL_SECONDS` (default 5), and builds the 9:15-9:30 opening range from those samples. It needs the bot to be running at 9:15, which the 09:05 timer does. If login fails, packages are missing, a stock's token does not match, or Angel One blocks a call, the bot silently uses Yahoo for that moment. Needs `smartapi-python` and `pyotp` in the server's venv (`pip install -r requirements-angelone-test.txt`) and these in `.env` (names are matched flexibly, see `angel_feed.py`): API key, client code, PIN, TOTP secret.
