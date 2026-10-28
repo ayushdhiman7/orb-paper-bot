@@ -61,3 +61,9 @@ By default a trade only closes at its stop, its target or the 15:15 square-off. 
 - `AI_EXITS=act`: an "exit" answer closes the trade at market (reason `ai_exit`, the AI's sentence is saved on the trade).
 
 The AI can only close a trade earlier. It cannot widen the stop or hold past 15:15, and if the API fails the trade is simply held.
+
+## Auto deploy (EC2 pulls from GitHub)
+
+A systemd timer (`orb-update.timer`) checks GitHub every 5 minutes. When `main` has new commits it pulls them (fast-forward only), installs new packages if `requirements.txt` changed, checks that the Python files compile (rolls back if not) and refreshes the dashboard files in Nginx. It never restarts the bot: the bot starts fresh each weekday 09:05 IST and uses the latest code then. No inbound SSH is needed, so port 22 can stay closed.
+
+Install or refresh once: `cd ~/orb-paper-bot && git pull origin main && bash deploy/install.sh`. Watch it: `journalctl -u orb-update -n 20 --no-pager`. If you change files in `deploy/*.service` or `*.timer`, run `bash deploy/install.sh` again.

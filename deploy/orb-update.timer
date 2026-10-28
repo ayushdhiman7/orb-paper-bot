@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for new ORB bot code every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=orb-update.service
+
+[Install]
+WantedBy=timers.target

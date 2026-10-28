@@ -1,0 +1,8 @@
+[Unit]
+Description=Pull the latest ORB bot code from GitHub (never restarts the bot)
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/env bash __DIR__/deploy/update.sh
