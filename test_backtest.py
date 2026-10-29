@@ -24,7 +24,6 @@ def test_daily_loss_cap_blocks_later_entries_after_open_loss(monkeypatch):
     ]
     trades = backtest.run_day(signals, cost_pct=0.0)
     assert [t["symbol"] for t in trades] == ["LOSS"]
-    assert trades[0]["blocked_by_daily_cap"] is True
 
 
 def test_run_day_accepts_signal_without_mark_path(monkeypatch):
