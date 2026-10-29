@@ -1,0 +1,82 @@
+name: dashboard-deploy-ec2
+
+on:
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-deploy-ec2.yml"
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-deploy-ec2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-ec2-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build dashboard
+        run: npm run build
+
+      - name: Upload built dashboard
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: orb-dashboard-dist-${{ github.sha }}
+          path: dashboard/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Configure SSH
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$EC2_HOST"
+          test -n "$EC2_SSH_KEY"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/orb_dashboard_deploy
+          chmod 600 ~/.ssh/orb_dashboard_deploy
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy static build to isolated release directory
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$EC2_HOST"
+          test -n "$EC2_USER"
+          RELEASE_DIR="orb-dashboard-react/releases/$RELEASE_SHA"
+          ssh -i ~/.ssh/orb_dashboard_deploy "$EC2_USER@$EC2_HOST" "mkdir -p '$RELEASE_DIR'"
+          rsync -az --delete -e "ssh -i ~/.ssh/orb_dashboard_deploy" dist/ "$EC2_USER@$EC2_HOST:$RELEASE_DIR/"
+          ssh -i ~/.ssh/orb_dashboard_deploy "$EC2_USER@$EC2_HOST" "ln -sfn 'releases/$RELEASE_SHA' orb-dashboard-react/current"
+          echo "Uploaded dashboard build to ~/$RELEASE_DIR"
