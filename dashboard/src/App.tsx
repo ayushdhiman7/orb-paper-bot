@@ -9,10 +9,10 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { isSupabaseConfigured, loadDashboardData } from "./lib/supabase";
-import type { ControlTrade, PaperTrade } from "./lib/supabase";
+import type { BacktestRun, ControlTrade, PaperTrade } from "./lib/supabase";
 
 type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor";
-type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[] };
+type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[] };
 
 const demoTrades: PaperTrade[] = [
   { id: 901, ts: "2026-10-29T09:44:00+05:30", symbol: "RELIANCE.NS", side: "BUY", qty: 8, entry: 1468.2, exit: 1481.4, pnl: 94.62, reason: "target", status: "closed", llm_decision: "take", llm_reason: "Breakout holds above opening range." },
@@ -35,7 +35,7 @@ const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { 
 
 function App() {
   const [tab, setTab] = useState<Tab>("Overview");
-  const [data, setData] = useState<DashboardData>({ trades: demoTrades, controls: demoControls });
+  const [data, setData] = useState<DashboardData>({ trades: demoTrades, controls: demoControls, backtests: [] });
   const [demo, setDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -51,6 +51,8 @@ function App() {
       const fresh = await loadDashboardData();
       setData(fresh); setDemo(false);
     } catch (e) {
+      setData({ trades: [], controls: [], backtests: [] });
+      setDemo(false);
       setError(e instanceof Error ? e.message : "Could not load dashboard data.");
     } finally { setLoading(false); }
   }, []);
@@ -69,7 +71,12 @@ function App() {
   const winRate = closedTrades.length ? winners / closedTrades.length * 100 : 0;
   const openTrades = data.trades.filter(t => t.status === "open");
   const controlTrades = data.controls.filter(t => t.pnl !== null && (activeRange === "ALL" || new Date(t.ts) >= new Date(Date.now() - (activeRange === "1D" ? 1 : activeRange === "30D" ? 30 : 7) * 86400000)));
-  const controlPnl = controlTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
+  const tradeById = new Map(closedTrades.map(t => [String(t.id), t]));
+  const matchedControls = controlTrades.filter(c => c.trade_id != null && c.pnl != null && tradeById.has(String(c.trade_id)) && tradeById.get(String(c.trade_id))?.pnl != null && !tradeById.get(String(c.trade_id))?.exit_estimated);
+  const matchedTradeIds = new Set(matchedControls.map(c => String(c.trade_id)));
+  const matchedTrades = closedTrades.filter(t => matchedTradeIds.has(String(t.id)));
+  const controlPnl = matchedControls.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
+  const matchedAiPnl = matchedTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
   const aiSkipped = data.trades.filter(t => t.llm_decision === "skip").length;
   const filteredTrades = data.trades.filter(t =>
     (sideFilter === "All sides" || t.side === sideFilter) &&
@@ -112,10 +119,10 @@ function App() {
         <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
         {demo && <div className="notice demo-notice"><Sparkles size={16}/><span><strong>Preview mode.</strong> Sample data is shown. Add your Supabase URL and publishable/anon key to load your real paper-trading records.</span><span className="notice-tag">DEMO DATA</span></div>}
         {error && <div className="notice error-notice"><Database size={16}/><span><strong>Could not refresh data.</strong> {error}</span><button className="text-button" onClick={() => void refresh()}>Retry</button></div>}
-        {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={controlTrades.length} controlPnl={controlPnl} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
+        {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
         {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
-        {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiPnl={totalPnl} controlPnl={controlPnl} aiSkipped={aiSkipped}/>}
-        {tab === "Backtests" && <ResearchPage/>}
+        {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
+        {tab === "Backtests" && <ResearchPage runs={data.backtests}/>} 
         {tab === "Risk monitor" && <RiskPage trades={closedTrades} openTrades={openTrades} totalPnl={totalPnl}/>}
         <footer className="footer"><span><ShieldCheck size={14}/> Paper trading only · No broker orders</span><span>ORB Terminal <b>v0.1</b> <span className="footer-sep">·</span> Data source: {demo ? "sample preview" : "Supabase"}</span></footer>
       </div>
@@ -155,21 +162,72 @@ function Journal({ trades, query, setQuery, sideFilter, setSideFilter }: { trade
   return <section className="panel journal-panel"><div className="journal-toolbar"><div className="search-box"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search symbol, reason or AI decision"/></div><select value={sideFilter} onChange={e=>setSideFilter(e.target.value)} aria-label="Filter side"><option>All sides</option><option>BUY</option><option>SELL</option></select><button className="button-secondary" onClick={()=>{setQuery("");setSideFilter("All sides");}}><X size={15}/> Reset</button></div><div className="panel-heading journal-heading"><div><h3>Trade journal</h3><p>{trades.length} trades match the current filters</p></div><span className="select-chip"><CalendarDays size={14}/> All available dates</span></div><TradeTable trades={trades}/></section>;
 }
 
-function AIComparison({ trades, controls, aiPnl, controlPnl, aiSkipped }: { trades:PaperTrade[]; controls:ControlTrade[]; aiPnl:number; controlPnl:number; aiSkipped:number }) {
-  const aiWinRate = trades.length ? trades.filter(t=>Number(t.pnl)>0).length/trades.length*100 : 0;
-  const controlWinRate = controls.length ? controls.filter(t=>Number(t.pnl)>0).length/controls.length*100 : 0;
+function AIComparison({ trades, controls, aiSkipped }: { trades:PaperTrade[]; controls:ControlTrade[]; aiSkipped:number }) {
+  const byId = new Map(trades.map(t => [String(t.id), t]));
+  const matched = controls.filter(c => {
+    if (c.trade_id == null || c.pnl == null) return false;
+    const t = byId.get(String(c.trade_id));
+    return Boolean(t && t.pnl != null && !t.exit_estimated);
+  });
+  const pairedTrades = matched.map(c => byId.get(String(c.trade_id))!).filter(Boolean);
+  const aiPnl = pairedTrades.reduce((sum,t)=>sum+Number(t.pnl??0),0);
+  const controlPnl = matched.reduce((sum,c)=>sum+Number(c.pnl??0),0);
+  const aiWinRate = pairedTrades.length ? pairedTrades.filter(t=>Number(t.pnl)>0).length/pairedTrades.length*100 : 0;
+  const controlWinRate = matched.length ? matched.filter(t=>Number(t.pnl)>0).length/matched.length*100 : 0;
   const delta = aiPnl-controlPnl;
-  return <><div className="notice research-notice"><ShieldCheck size={16}/><span><strong>Research view, not a live recommendation.</strong> AI and no-AI results must use matched signals, equivalent sizing and completed trades before drawing conclusions.</span></div><div className="metric-grid compare-metrics"><MetricCard label="AI strategy net P&L" value={money(aiPnl)} icon={Bot} sub={`${trades.length} closed trades`}/><MetricCard label="No-AI control P&L" value={money(controlPnl)} icon={Activity} sub={`${controls.length} completed controls`}/><MetricCard label="P&L difference" value={money(delta)} positive={delta>=0} icon={TrendingUp} sub="AI minus control"/><MetricCard label="AI skip decisions" value={String(aiSkipped)} icon={ShieldCheck} sub="Logged AI rejections"/></div><div className="main-grid"><section className="panel"><div className="panel-heading"><div><h3>Strategy comparison</h3><p>Net realized INR after estimated costs</p></div></div><div className="compare-rows"><CompareBar label="AI strategy" value={aiPnl} max={Math.max(Math.abs(aiPnl),Math.abs(controlPnl),1)}/><CompareBar label="No-AI control" value={controlPnl} max={Math.max(Math.abs(aiPnl),Math.abs(controlPnl),1)}/></div><div className="research-note"><CircleHelp size={15}/><span>Comparisons are only as reliable as their matched signals and cost assumptions.</span></div></section><section className="panel"><div className="panel-heading"><div><h3>Quality indicators</h3><p>Use completed records only</p></div></div><div className="status-row"><span>AI strategy win rate</span><strong>{aiWinRate.toFixed(1)}%</strong></div><div className="status-row"><span>No-AI control win rate</span><strong>{controlWinRate.toFixed(1)}%</strong></div><div className="status-row"><span>AI skip count</span><strong>{aiSkipped}</strong></div><div className="status-row"><span>Control sample size</span><strong>{controls.length}</strong></div></section></div><section className="panel table-panel"><div className="panel-heading"><div><h3>Control-group outcomes</h3><p>Hypothetical trades using the original breakout exits</p></div><span className="ai-tag ai-na">NO-AI BASELINE</span></div><div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Side</th><th>AI decision</th><th>Exit reason</th><th>Entry → exit</th><th>Control P&L</th><th>Closed at</th></tr></thead><tbody>{controls.map(t=><tr key={t.id}><td><strong>{t.symbol.replace(".NS","")}</strong></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side ?? "—"}</span></td><td><span className={`ai-tag ${t.ai_decision==="take"?"ai-take":t.ai_decision==="skip"?"ai-skip":"ai-na"}`}>{t.ai_decision ?? "—"}</span></td><td>{(t.exit_reason??"—").replaceAll("_"," ")}</td><td>{t.entry_price?.toFixed(2) ?? "—"} → {t.exit_price?.toFixed(2) ?? "—"}</td><td className={Number(t.pnl)>=0?"positive-text":"negative-text"}>{t.pnl==null?"—":preciseMoney(Number(t.pnl))}</td><td className="date-cell">{formatDate(t.ts)}</td></tr>)}</tbody></table></div></section></>;
+  const unpaired = controls.filter(c => c.trade_id == null || !byId.has(String(c.trade_id)));
+  return <>
+    <div className="notice research-notice"><ShieldCheck size={16}/><span><strong>Matched-signal comparison only.</strong> P&amp;L totals below include only completed control outcomes linked to a confirmed, non-estimated AI-managed paper trade. AI-skipped signals have no executed AI trade and are shown separately, not mixed into the P&amp;L difference.</span></div>
+    <div className="metric-grid compare-metrics">
+      <MetricCard label="AI P&amp;L (matched)" value={money(aiPnl)} icon={Bot} sub={`${pairedTrades.length} matched AI trades`}/>
+      <MetricCard label="No-AI P&amp;L (matched)" value={money(controlPnl)} icon={Activity} sub={`${matched.length} matched control outcomes`}/>
+      <MetricCard label="Matched P&amp;L difference" value={money(delta)} positive={delta>=0} icon={TrendingUp} sub="AI minus no-AI, same linked trades"/>
+      <MetricCard label="AI skip decisions" value={String(aiSkipped)} icon={ShieldCheck} sub={`${unpaired.length} unpaired controls (mostly skipped signals)`}/>
+    </div>
+    <div className="main-grid">
+      <section className="panel"><div className="panel-heading"><div><h3>Matched strategy comparison</h3><p>Completed, linked signal outcomes · INR</p></div></div>
+        {matched.length ? <div className="compare-rows"><CompareBar label="AI strategy" value={aiPnl} max={Math.max(Math.abs(aiPnl),Math.abs(controlPnl),1)}/><CompareBar label="No-AI control" value={controlPnl} max={Math.max(Math.abs(aiPnl),Math.abs(controlPnl),1)}/></div> : <div className="empty-inline"><CircleHelp size={18}/><span>No matched completed control outcomes yet. The dashboard will not infer a comparison from unrelated trades.</span></div>}
+        <div className="research-note"><CircleHelp size={15}/><span>Only linked trade IDs are comparable here. Unlinked controls are not counted in this P&amp;L delta.</span></div>
+      </section>
+      <section className="panel"><div className="panel-heading"><div><h3>Matched quality indicators</h3><p>Paired sample only</p></div></div>
+        <div className="status-row"><span>AI win rate (matched)</span><strong>{aiWinRate.toFixed(1)}%</strong></div>
+        <div className="status-row"><span>No-AI win rate (matched)</span><strong>{controlWinRate.toFixed(1)}%</strong></div>
+        <div className="status-row"><span>Matched sample size</span><strong>{matched.length}</strong></div>
+        <div className="status-row"><span>Unpaired control outcomes</span><strong>{unpaired.length}</strong></div>
+      </section>
+    </div>
+    <section className="panel table-panel"><div className="panel-heading"><div><h3>Matched control-group outcomes</h3><p>Rows with a linked, confirmed AI paper trade only</p></div><span className="ai-tag ai-na">MATCHED ONLY</span></div>
+      {matched.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Side</th><th>AI decision</th><th>Exit reason</th><th>Entry → exit</th><th>AI P&amp;L</th><th>No-AI P&amp;L</th><th>Closed at</th></tr></thead><tbody>{matched.map(c=>{const t=byId.get(String(c.trade_id))!;return <tr key={c.id}><td><strong>{c.symbol.replace(".NS","")}</strong></td><td><span className={`side-tag ${c.side==="BUY"?"buy":"sell"}`}>{c.side??"—"}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision??"—"}</span></td><td>{(c.exit_reason??"—").replaceAll("_"," ")}</td><td>{c.entry_price?.toFixed(2)??"—"} → {c.exit_price?.toFixed(2)??"—"}</td><td className={Number(t.pnl)>=0?"positive-text":"negative-text"}>{preciseMoney(Number(t.pnl))}</td><td className={Number(c.pnl)>=0?"positive-text":"negative-text"}>{preciseMoney(Number(c.pnl))}</td><td className="date-cell">{formatDate(c.ts)}</td></tr>})}</tbody></table></div> : <div className="table-empty">No linked matched outcomes are available yet.</div>}
+    </section>
+    <section className="panel table-panel"><div className="panel-heading"><div><h3>Unpaired no-AI outcomes</h3><p>Kept separate because no corresponding executed AI trade is linked</p></div><span className="ai-tag ai-na">NOT IN P&amp;L DELTA</span></div>
+      {unpaired.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Side</th><th>AI decision</th><th>Outcome</th><th>Hypothetical P&amp;L</th><th>Closed at</th></tr></thead><tbody>{unpaired.map(c=><tr key={c.id}><td><strong>{c.symbol.replace(".NS","")}</strong></td><td>{c.side??"—"}</td><td>{c.ai_decision??"—"}</td><td>{(c.exit_reason??"—").replaceAll("_"," ")}</td><td className={Number(c.pnl)>=0?"positive-text":"negative-text"}>{c.pnl==null?"—":preciseMoney(Number(c.pnl))}</td><td className="date-cell">{formatDate(c.ts)}</td></tr>)}</tbody></table></div> : <div className="table-empty">No unpaired control outcomes in this date range.</div>}
+    </section>
+  </>;
 }
 function CompareBar({label,value,max}:{label:string;value:number;max:number}) { return <div className="compare-bar-row"><div><span>{label}</span><strong className={value>=0?"positive-text":"negative-text"}>{money(value)}</strong></div><div className="compare-track"><span className={value>=0?"bar-positive":"bar-negative"} style={{width:`${Math.max(3,Math.abs(value)/max*100)}%`}}/></div></div>; }
 
-function ResearchPage() {
-  return <><div className="metric-grid"><MetricCard label="Saved backtest runs" value="—" icon={BarChart3} sub="Connected to backtest_runs when available"/><MetricCard label="Strategy variants" value="4" icon={SlidersHorizontal} sub="Alternative exit rules tracked"/><MetricCard label="Out-of-sample results" value="—" icon={TrendingUp} sub="No values inferred"/><MetricCard label="Evidence status" value="Collecting" icon={Clock3} sub="Prospective paper observations"/></div><section className="panel empty-research"><div className="empty-research-icon"><BarChart3 size={23}/></div><h3>Backtest research workspace</h3><p>Historical runs will appear here once the dashboard is connected to saved backtest results. Paper performance and historical backtests will remain separate to avoid mixing evidence.</p><span className="ai-tag ai-na">NO BACKTEST DATA IN THIS VIEW YET</span></section></>;
+function ResearchPage({runs}:{runs:BacktestRun[]}) {
+  const latest = runs[0];
+  const baseline = latest?.result?.baseline;
+  const test = latest?.result?.test;
+  const totalRuns = runs.length;
+  return <>
+    <div className="metric-grid">
+      <MetricCard label="Saved backtest runs" value={String(totalRuns)} icon={BarChart3} sub="Loaded from Supabase backtest_runs"/>
+      <MetricCard label="Latest baseline P&amp;L" value={baseline?.total == null ? "—" : money(Number(baseline.total))} icon={TrendingUp} sub={baseline?.n == null ? "No baseline summary" : `${baseline.n} trades in latest run`}/>
+      <MetricCard label="Out-of-sample P&amp;L" value={test?.total == null ? "—" : money(Number(test.total))} icon={Activity} sub={test?.n == null ? "No test split recorded" : `${test.n} test trades`}/>
+      <MetricCard label="Latest verdict" value={baseline?.verdict ? (String(baseline.verdict).startsWith("REJECT") ? "Reject" : "Review") : "—"} icon={ShieldCheck} sub="Read from saved result, not inferred"/>
+    </div>
+    {latest ? <section className="panel backtest-detail"><div className="panel-heading"><div><h3>Latest backtest</h3><p>Saved {formatDate(latest.created_at)} · run #{latest.id}</p></div><span className="ai-tag ai-na">HISTORICAL RESEARCH</span></div>
+      {latest.summary_md ? <pre className="backtest-summary">{latest.summary_md}</pre> : <div className="empty-inline"><CircleHelp size={18}/><span>This run has structured results but no summary text.</span></div>}
+    </section> : <section className="panel empty-research"><div className="empty-research-icon"><BarChart3 size={23}/></div><h3>No saved backtests are available</h3><p>Once read access to backtest_runs is configured, saved historical runs will appear here. Backtests stay separate from live paper performance.</p><span className="ai-tag ai-na">NO BACKTEST DATA LOADED</span></section>}
+    {runs.length > 1 && <section className="panel table-panel"><div className="panel-heading"><div><h3>Backtest history</h3><p>Saved runs newest first</p></div></div><div className="table-scroll"><table><thead><tr><th>Run</th><th>Created</th><th>Baseline trades</th><th>Baseline P&amp;L</th><th>Expectancy</th><th>Profit factor</th><th>Test P&amp;L</th></tr></thead><tbody>{runs.map(run=>{const b=run.result?.baseline;const t=run.result?.test;return <tr key={run.id}><td>#{run.id}</td><td className="date-cell">{formatDate(run.created_at)}</td><td>{b?.n??"—"}</td><td>{b?.total==null?"—":money(Number(b.total))}</td><td>{b?.exp==null?"—":preciseMoney(Number(b.exp))}</td><td>{b?.pf==null?"—":Number(b.pf).toFixed(2)}</td><td>{t?.total==null?"—":money(Number(t.total))}</td></tr>})}</tbody></table></div></section>}
+  </>;
 }
 function RiskPage({trades,openTrades,totalPnl}:{trades:PaperTrade[];openTrades:PaperTrade[];totalPnl:number}) {
   const exposure=openTrades.reduce((s,t)=>s+Number(t.qty)*Number(t.last_price??t.entry),0);
   const losses=trades.filter(t=>Number(t.pnl)<0).length;
-  return <><div className="metric-grid"><MetricCard label="Open positions" value={String(openTrades.length)} icon={Activity} sub="Unclosed paper positions"/><MetricCard label="Marked exposure" value={money(exposure)} icon={Wallet} sub="Based on last known marks"/><MetricCard label="Realized P&L" value={money(totalPnl)} positive={totalPnl>=0} icon={TrendingUp} sub="Estimated exits excluded"/><MetricCard label="Losing trades" value={String(losses)} icon={ShieldCheck} sub="Closed trades only"/></div><div className="main-grid"><section className="panel"><div className="panel-heading"><div><h3>Risk guardrails</h3><p>Configured strategy limits</p></div><ShieldCheck size={17} className="positive-text"/></div><div className="status-row"><span>Risk per trade</span><strong>1% of capital</strong></div><div className="status-row"><span>Daily loss cap</span><strong>3% of capital</strong></div><div className="status-row"><span>Maximum entries per day</span><strong>3</strong></div><div className="status-row"><span>Order environment</span><strong className="positive-text">Paper only</strong></div></section><section className="panel"><div className="panel-heading"><div><h3>Open position marks</h3><p>Latest values reported by the bot</p></div></div>{openTrades.length ? openTrades.map(t=><div className="insight-row" key={t.id}><div className="symbol-icon">{t.symbol.slice(0,2)}</div><div className="insight-copy"><strong>{t.symbol.replace(".NS","")} · {t.side}</strong><span>{t.qty} shares · last mark {t.last_price?.toFixed(2)??"not available"}</span></div><span className="insight-value">{t.last_price_ts?formatDate(t.last_price_ts):"—"}</span></div>):<div className="empty-inline"><CheckCircle2 size={18}/><span>No open positions reported.</span></div>}</section></div></>;
+  return <><div className="metric-grid"><MetricCard label="Open positions" value={String(openTrades.length)} icon={Activity} sub="Unclosed paper positions"/><MetricCard label="Marked exposure" value={money(exposure)} icon={Wallet} sub="Based on last known marks"/><MetricCard label="Realized P&L" value={money(totalPnl)} positive={totalPnl>=0} icon={TrendingUp} sub="Estimated exits excluded"/><MetricCard label="Losing trades" value={String(losses)} icon={ShieldCheck} sub="Closed trades only"/></div><div className="main-grid"><section className="panel"><div className="panel-heading"><div><h3>Risk guardrails</h3><p>Configured strategy limits</p></div><ShieldCheck size={17} className="positive-text"/></div><div className="status-row"><span>Risk per trade</span><strong>Configured in bot env</strong></div><div className="status-row"><span>Daily loss cap</span><strong>Configured in bot env</strong></div><div className="status-row"><span>Maximum entries per day</span><strong>Configured in bot env</strong></div><div className="status-row"><span>Order environment</span><strong className="positive-text">Paper only</strong></div></section><section className="panel"><div className="panel-heading"><div><h3>Open position marks</h3><p>Latest values reported by the bot</p></div></div>{openTrades.length ? openTrades.map(t=><div className="insight-row" key={t.id}><div className="symbol-icon">{t.symbol.slice(0,2)}</div><div className="insight-copy"><strong>{t.symbol.replace(".NS","")} · {t.side}</strong><span>{t.qty} shares · last mark {t.last_price?.toFixed(2)??"not available"}</span></div><span className="insight-value">{t.last_price_ts?formatDate(t.last_price_ts):"—"}</span></div>):<div className="empty-inline"><CheckCircle2 size={18}/><span>No open positions reported.</span></div>}</section></div></>;
 }
 
 export default App;
