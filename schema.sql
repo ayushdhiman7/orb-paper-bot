@@ -23,7 +23,8 @@ alter table paper_trades add column if not exists last_price numeric;
 alter table paper_trades add column if not exists last_price_ts timestamptz;
 alter table paper_trades add column if not exists llm_decision text;
 alter table paper_trades add column if not exists llm_reason text;
-create policy "public read paper_trades" on paper_trades for select to anon using (true);
+-- No anon/authenticated read policies: paper-trades data is private.
+revoke all on table paper_trades from anon, authenticated;
 
 create table if not exists backtest_runs (
   id bigint generated always as identity primary key,
@@ -32,4 +33,5 @@ create table if not exists backtest_runs (
   result jsonb not null
 );
 alter table backtest_runs enable row level security;
-create policy "public read backtest_runs" on backtest_runs for select to anon using (true);
+-- Backtest results may contain strategy details; keep them private too.
+revoke all on table backtest_runs from anon, authenticated;
