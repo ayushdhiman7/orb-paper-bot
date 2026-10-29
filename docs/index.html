@@ -8,7 +8,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --surface2: #1c232d; --line: #2a323d;
@@ -151,10 +150,10 @@
 <div class="top">
   <div class="bar">
     <h1>ORB Paper Bot</h1>
-    <div style="display:flex;gap:8px"><button class="btn" id="signout" type="button" hidden>Sign out</button><button class="btn" id="refresh" type="button" hidden>Refresh</button></div>
+    <button class="btn" id="refresh" type="button">Refresh</button>
   </div>
   <p class="status" id="status">Loading...</p>
-  <div class="tabs" id="dashboard-tabs" role="tablist" aria-label="Sections" hidden>
+  <div class="tabs" role="tablist" aria-label="Sections">
     <button class="tab" role="tab" id="t-overview" data-tab="overview" aria-selected="true" aria-controls="p-overview">Overview</button>
     <button class="tab" role="tab" id="t-history" data-tab="history" aria-selected="false" aria-controls="p-history">History</button>
     <button class="tab" role="tab" id="t-stocks" data-tab="stocks" aria-selected="false" aria-controls="p-stocks">Stocks</button>
@@ -162,17 +161,7 @@
   </div>
 </div>
 
-<section id="auth-panel" class="card" style="max-width:460px;margin:24px auto">
-  <h2>Private dashboard sign-in</h2>
-  <p class="note" style="margin-top:0">Sign in with your authorized email. A secure magic link will be sent to your inbox.</p>
-  <form id="login-form">
-    <label for="login-email" class="meta" style="display:block;margin:12px 0 6px">Email address</label>
-    <input id="login-email" type="email" autocomplete="email" required placeholder="you@example.com" style="width:100%;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit">
-    <button class="btn" id="login-button" type="submit" style="margin-top:12px;width:100%">Email me a sign-in link</button>
-    <p class="note" id="auth-message" role="status" aria-live="polite"></p>
-  </form>
-</section>
-<section class="panel" id="p-overview" role="tabpanel" aria-labelledby="t-overview" hidden></section>
+<section class="panel" id="p-overview" role="tabpanel" aria-labelledby="t-overview"></section>
 <section class="panel" id="p-history" role="tabpanel" aria-labelledby="t-history" hidden></section>
 <section class="panel" id="p-stocks" role="tabpanel" aria-labelledby="t-stocks" hidden></section>
 <section class="panel" id="p-backtest" role="tabpanel" aria-labelledby="t-backtest" hidden></section>
@@ -183,10 +172,7 @@
 const SUPABASE_URL = "https://gbqmvnekxsckzjzcorac.supabase.co";
 // Publishable key: safe to expose, it can only do what the read-only table policies allow.
 const SUPABASE_KEY = "sb_publishable_xqMJstPMLis5zzOIxityFw_Fz32fdv3";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-});
-let accessToken = null;
+const CACHE_KEY = "orb_cache_v2";
 
 const state = { trades: [], bt: null, lab: null, tab: "overview", range: "30", side: "all", reason: "all", note: "Loading..." };
 
@@ -443,90 +429,41 @@ document.addEventListener("click", (e) => {
   if (chip) { state[chip.dataset.filter] = chip.dataset.value; render(); }
 });
 
+async function get(path) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SUPABASE_KEY } });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
 async function load() {
-  if (!accessToken) return;
   const btn = $("refresh");
   btn.disabled = true;
-  state.note = "Loading private data...";
-  $("status").textContent = state.note;
-  try {
-    const { data, error } = await supabase.functions.invoke("dashboard-data", {
-      headers: { Authorization: "Bearer " + accessToken }
-    });
-    if (error) throw error;
-    if (!data || !Array.isArray(data.trades) || !Array.isArray(data.backtests)) throw new Error("Unexpected response from private dashboard API");
-    state.trades = data.trades;
-    state.bt = data.backtests.find((x) => x.result && x.result.kind !== "lab") || null;
-    state.lab = data.backtests.find((x) => x.result && x.result.kind === "lab") || null;
-    state.note = "Private data updated " + istClock(new Date());
-  } catch (error) {
-    state.note = "Could not load private data. " + (error?.message || "Please sign in again or try Refresh.");
-  } finally {
-    btn.disabled = false;
-    render();
-  }
-}
-
-function setAuthenticated(session) {
-  accessToken = session?.access_token || null;
-  $("auth-panel").hidden = Boolean(accessToken);
-  $("dashboard-tabs").hidden = !accessToken;
-  $("refresh").hidden = !accessToken;
-  $("signout").hidden = !accessToken;
-  ["overview", "history", "stocks", "backtest"].forEach((t) => {
-    $("p-" + t).hidden = !accessToken || state.tab !== t;
-  });
-  if (!accessToken) {
-    state.trades = [];
-    state.bt = null;
-    state.lab = null;
-    state.note = "Sign in to view private paper-trading data.";
-    render();
+  const [tr, bt] = await Promise.allSettled([
+    get("paper_trades?select=*&order=ts.desc&limit=2000"),
+    get("backtest_runs?select=*&order=created_at.desc&limit=10"),
+  ]);
+  if (tr.status === "fulfilled") {
+    state.trades = tr.value;
+    if (bt.status === "fulfilled") {
+      state.bt = bt.value.find((x) => x.result && x.result.kind !== "lab") || null;
+      state.lab = bt.value.find((x) => x.result && x.result.kind === "lab") || null;
+    }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ trades: state.trades, bt: state.bt, lab: state.lab, at: Date.now() })); } catch (_) {}
+    state.note = "Updated " + istClock(new Date());
   } else {
-    load();
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (_) {}
+    if (cached) { state.trades = cached.trades; state.bt = cached.bt; state.lab = cached.lab || null; state.note = "Offline, showing data saved " + istTime(cached.at); }
+    else { state.note = "Could not load (" + tr.reason.message + "). Tap Refresh."; }
   }
+  btn.disabled = false;
+  render();
 }
 
-$("login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = $("login-button"), message = $("auth-message");
-  const email = $("login-email").value.trim();
-  button.disabled = true;
-  message.textContent = "Sending sign-in link...";
-  try {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin + window.location.pathname }
-    });
-    if (error) throw error;
-    message.textContent = "If this email is authorized, a sign-in link has been sent. Check your inbox.";
-  } catch (error) {
-    message.textContent = error?.message || "Could not send sign-in link.";
-  } finally {
-    button.disabled = false;
-  }
-});
-
-$("signout").addEventListener("click", async () => {
-  $("signout").disabled = true;
-  try { await supabase.auth.signOut(); } finally {
-    accessToken = null;
-    state.trades = [];
-    state.bt = null;
-    state.lab = null;
-    $("signout").disabled = false;
-    setAuthenticated(null);
-  }
-});
-
-supabase.auth.onAuthStateChange((_event, session) => {
-  setAuthenticated(session);
-});
 try { const t = localStorage.getItem("orb_tab"); if (["overview", "history", "stocks", "backtest"].includes(t)) state.tab = t; } catch (_) {}
 $("refresh").addEventListener("click", load);
 render();
-supabase.auth.getSession().then(({ data }) => setAuthenticated(data.session));
-setInterval(() => { if (document.visibilityState === "visible" && accessToken) load(); }, 60000);
+load();
+setInterval(() => { if (document.visibilityState === "visible") load(); }, 60000);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
