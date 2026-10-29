@@ -324,6 +324,9 @@ def manage_positions(state: State, now: datetime):
         pos = state.positions[symbol]
         price = last_price(symbol)
         if price is None:
+            # Invalidate the previous mark: do not let a stale price masquerade
+            # as a current mark in daily loss-cap calculations.
+            state.last_prices.pop(symbol, None)
             continue
         state.last_prices[symbol] = price
         log_price(pos, price, now)
