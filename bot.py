@@ -3,7 +3,7 @@ Opening-Range-Breakout PAPER trading bot for NSE stocks.
 
 - Data: yfinance (free, ~15 min delayed for NSE, fine for paper testing).
 - Orders: simulated only. No broker connection, no real money.
-- Logging: Supabase (optional). Falls back to local CSV if keys are missing.
+- Logging: Supabase is required for safe startup and durable paper-trade state.
 """
 import csv
 import os
@@ -96,9 +96,9 @@ SB = get_supabase()
 
 
 def log_entry(pos):
-    """Save a trade as 'open' the moment it is entered, so the dashboard can show it."""
-    if not SB:
-        return None
+    """Persist an open paper trade before changing in-memory position state."""
+    if SB is None:
+        raise RuntimeError("Supabase persistence is required to record paper entries.")
     try:
         res = SB.table("paper_trades").insert({
             "ts": pos.opened_at.isoformat(), "symbol": pos.symbol, "side": pos.side,
@@ -106,41 +106,43 @@ def log_entry(pos):
             "last_price": round(pos.entry, 2), "last_price_ts": pos.opened_at.isoformat(),
             **({"llm_decision": pos.llm_decision, "llm_reason": pos.llm_reason} if pos.llm_decision else {}),
             "status": "open", "mode": "paper",
-        }).execute()
-        return res.data[0]["id"]
-    except Exception as e:  # never let logging crash the bot
-        print(f"[warn] Supabase open-trade insert failed: {e}")
-        return None
+        }).select("id").execute()
+        rows = getattr(res, "data", None) or []
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase did not return the inserted paper trade ID.")
+        return rows[0]["id"]
+    except Exception as e:
+        raise RuntimeError("Supabase open-trade insert failed; entry cancelled.") from e
 
 
 def log_price(pos, price: float, now):
-    """Save the latest price of an open trade so the dashboard can show live unrealised P&L."""
-    if not SB or pos.row_id is None:
-        return
+    """Persist a current mark; failures are surfaced so callers can halt new entries."""
+    if SB is None or pos.row_id is None:
+        raise RuntimeError("Cannot persist open-position mark without a Supabase row ID.")
     try:
         SB.table("paper_trades").update(
             {"last_price": round(price, 2), "last_price_ts": now.isoformat()}
         ).eq("id", pos.row_id).execute()
-    except Exception as e:  # never let logging crash the bot
-        print(f"[warn] Supabase price update failed: {e}")
+    except Exception as e:
+        raise RuntimeError("Supabase open-trade price update failed.") from e
 
 
 def log_trade(row: dict, row_id=None):
-    if SB:
-        try:
-            if row_id is not None:
-                SB.table("paper_trades").update({**row, "status": "closed"}).eq("id", row_id).execute()
-            else:
-                SB.table("paper_trades").insert({**row, "status": "closed"}).execute()
-            return
-        except Exception as e:  # never let logging crash the bot
-            print(f"[warn] Supabase write failed: {e}")
-    new = not os.path.exists("trades.csv")
-    with open("trades.csv", "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if new:
-            w.writeheader()
-        w.writerow(row)
+    """Persist a close before removing the position from in-memory state."""
+    if SB is None:
+        raise RuntimeError("Supabase persistence is required to close a paper trade safely.")
+    try:
+        if row_id is not None:
+            result = (SB.table("paper_trades")
+                      .update({**row, "status": "closed"}).eq("id", row_id)
+                      .select("id").execute())
+        else:
+            result = SB.table("paper_trades").insert({**row, "status": "closed"}).select("id").execute()
+        rows = getattr(result, "data", None) or []
+        if not rows:
+            raise RuntimeError("Supabase did not confirm the paper-trade close write.")
+    except Exception as e:
+        raise RuntimeError("Supabase paper-trade close write failed; position retained and bot halted.") from e
 
 
 def fee_for_notional(notional: float) -> float:
@@ -291,7 +293,12 @@ def try_entry(state: State, symbol: str, now: datetime):
     pos = Position(symbol, side, qty, entry_price, stop, target, now, entry_fee=entry_fee)
     if review:
         pos.llm_decision, pos.llm_reason = review["decision"], review["reason"]
-    pos.row_id = log_entry(pos)
+    try:
+        pos.row_id = log_entry(pos)
+    except RuntimeError as exc:
+        state.halted = True
+        print(f"[HALT] {exc} No new entries until persistence is repaired.")
+        return
     state.positions[symbol] = pos
     state.cash -= qty * entry_price + entry_fee
     state.trades_today += 1
@@ -301,22 +308,30 @@ def try_entry(state: State, symbol: str, now: datetime):
 
 
 def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
-    pos = state.positions.pop(symbol)
+    pos = state.positions[symbol]
     direction = 1 if pos.side == "BUY" else -1
     exit_fill = adverse_fill(price, direction, is_entry=False)
     gross = (exit_fill - pos.entry) * pos.qty * direction
     exit_fee = fee_for_notional(pos.qty * exit_fill)
     trade_net_pnl = gross - pos.entry_fee - exit_fee
-    state.day_pnl += gross - exit_fee  # entry fee was booked when the position opened
-    state.cash += pos.qty * pos.entry + gross - exit_fee  # release reserved notional and settle P&L/exit fee
-    state.done_symbols.add(symbol)
-    print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
-    log_trade({
+    row = {
         "ts": now.isoformat(), "symbol": symbol, "side": pos.side, "qty": pos.qty,
         "entry": round(pos.entry, 2), "exit": round(exit_fill, 2),
         "pnl": round(trade_net_pnl, 2), "reason": reason, "mode": "paper",
         **({"llm_reason": ((pos.llm_reason + " | ") if pos.llm_reason else "") + "EXIT: " + note} if note else {}),
-    }, row_id=pos.row_id)
+    }
+    try:
+        log_trade(row, row_id=pos.row_id)
+    except RuntimeError as exc:
+        state.halted = True
+        print(f"[HALT] {exc}")
+        return False
+    state.positions.pop(symbol)
+    state.day_pnl += gross - exit_fee  # entry fee was booked when the position opened
+    state.cash += pos.qty * pos.entry + gross - exit_fee  # release reserved notional and settle P&L/exit fee
+    state.done_symbols.add(symbol)
+    print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
+    return True
 
 
 def manage_positions(state: State, now: datetime):
@@ -324,9 +339,16 @@ def manage_positions(state: State, now: datetime):
         pos = state.positions[symbol]
         price = last_price(symbol)
         if price is None:
+            # Invalidate the previous mark: do not let a stale price masquerade
+            # as a current mark in daily loss-cap calculations.
+            state.last_prices.pop(symbol, None)
             continue
         state.last_prices[symbol] = price
-        log_price(pos, price, now)
+        try:
+            log_price(pos, price, now)
+        except RuntimeError as exc:
+            state.halted = True
+            print(f"[HALT] {exc} No new entries; position management continues.")
         better = (lambda a, b: a > b) if pos.side == "BUY" else (lambda a, b: a < b)
         if pos.peak is None or better(price, pos.peak):
             pos.peak = price
@@ -364,15 +386,54 @@ def marked_day_pnl(state: State) -> float:
 
 
 def check_daily_cap(state: State):
+    # Fail closed when an open position cannot be marked. Ignoring a missing quote
+    # could make the daily loss cap appear safer than it really is.
+    unmarked = [symbol for symbol in state.positions if state.last_prices.get(symbol) is None]
+    if unmarked and not state.halted:
+        state.halted = True
+        print(f"[HALT] Missing mark price for open position(s): {', '.join(unmarked)}. No new trades today.")
+        return
+
     marked_pnl = marked_day_pnl(state)
     if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
         state.halted = True
         print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
 
 
+def assert_safe_startup():
+    """Refuse to start when paper-position state cannot be recovered safely.
+
+    The bot currently keeps position state in memory. Starting without durable
+    Supabase logging, or while Supabase still has open rows from a prior process,
+    could forget an existing paper position and bypass its risk controls.
+    """
+    if SB is None:
+        raise RuntimeError(
+            "Supabase persistence is required for safe startup; configure "
+            "SUPABASE_URL and SUPABASE_KEY before running the paper bot."
+        )
+    try:
+        result = (SB.table("paper_trades").select("id,symbol")
+                  .eq("status", "open").eq("mode", "paper").limit(20).execute())
+    except Exception as exc:
+        raise RuntimeError(
+            "Cannot verify existing open paper trades; refusing to start. "
+            "Check Supabase connectivity/schema and resolve the open positions first."
+        ) from exc
+    open_rows = result.data or []
+    if open_rows:
+        symbols = ", ".join(str(row.get("symbol", "unknown")) for row in open_rows)
+        raise RuntimeError(
+            f"Found existing open paper trade(s) ({symbols}); refusing to start "
+            "because in-memory positions cannot be restored automatically. "
+            "Reconcile/close these rows before restarting."
+        )
+
+
 # ---------------- Main loop ----------------
 def run():
     global FEED
+    assert_safe_startup()
     state = State()
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
     if DATA_SOURCE == "angel":
@@ -391,14 +452,19 @@ def run():
                 print(f"[warn] Angel One poll: {FEED.last_error}")
 
         if ONE_DAY and (now.weekday() >= 5 or t > MARKET_CLOSE):
+            if state.positions:
+                raise RuntimeError(f"ONE_DAY ended with unresolved open paper position(s): {', '.join(sorted(state.positions))}; refusing silent exit.")
             print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
             return
 
         if now.weekday() >= 5 or t < MARKET_OPEN or t > MARKET_CLOSE:
             print(f"{now:%H:%M} market closed, sleeping")
-            if t > MARKET_CLOSE and state.trades_today:
+            if t > MARKET_CLOSE and state.trades_today and not state.positions:
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
-                state = State()  # reset for next day
+                state = State()  # reset only after every position is confirmed closed
+            elif t > MARKET_CLOSE and state.positions:
+                state.halted = True
+                print(f"[HALT] Position(s) still open after market close: {', '.join(sorted(state.positions))}. State retained; manual reconciliation required.")
             time.sleep(30 if FEED is not None and t < MARKET_OPEN and now.weekday() < 5 else 300)
             continue
 
@@ -408,6 +474,8 @@ def run():
                 if p is not None:
                     close_position(state, sym, p, "square_off", now)
             if ONE_DAY:
+                if state.positions:
+                    raise RuntimeError(f"ONE_DAY square-off failed; open position(s) remain: {', '.join(sorted(state.positions))}")
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
                 return
         elif t >= RANGE_END:

@@ -131,63 +131,127 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
         stop = entry * (1 - side * stop_pct / 100)
         target = entry + side * abs(entry - stop) * rr
         exit_price, reason, exit_ts = None, "square_off", ts
+        mark_path = []
         for j in range(i + 1, len(after)):
             r2, ts2 = after.iloc[j], after.index[j]
             exit_ts = ts2
+            mark_price = float(r2["Close"])
             if side == 1:
                 if r2["Low"] <= stop:
                     exit_price, reason = stop, "stop"
+                    mark_price = stop
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
                 if r2["High"] >= target:
                     exit_price, reason = target, "target"
+                    mark_price = target
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
             else:
                 if r2["High"] >= stop:
                     exit_price, reason = stop, "stop"
+                    mark_price = stop
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
                 if r2["Low"] <= target:
                     exit_price, reason = target, "target"
+                    mark_price = target
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
+            mark_path.append((ts2 + BAR, mark_price))
         if exit_price is None:
             exit_price = float(after.iloc[-1]["Close"]) if len(after) > i + 1 else close
             exit_ts = after.index[-1] if len(after) > i + 1 else ts
         exit_fill = exit_price * (1 - side * slip)
         return {"symbol": symbol, "side": side, "entry": entry, "stop": stop, "exit_fill": exit_fill,
-                "reason": reason, "entry_time": ts + BAR, "exit_time": exit_ts + BAR}
+                "reason": reason, "entry_time": ts + BAR, "exit_time": exit_ts + BAR,
+                "mark_path": mark_path}
     return None
 
 
 def run_day(signals, cost_pct=None):
-    """Apply the bot's portfolio rules (cash limit, 1% risk sizing, max trades, daily loss cap)."""
+    """Apply portfolio rules chronologically, including mark-to-market loss-cap checks."""
     cost_pct = COST_PCT if cost_pct is None else cost_pct
     signals = sorted(signals, key=lambda s: s["entry_time"])
-    cash, open_, trades, realized, taken = CAPITAL, [], [], 0.0, 0
+    cash, trades, open_, taken = CAPITAL, [], {}, 0
     side_cost_pct = cost_pct / 2.0
-    for s in signals:
-        for o in [o for o in open_ if o["exit_time"] <= s["entry_time"]]:
-            cash += o["value"] + o["gross"] - o["exit_fee"]
-            realized += o["net"]
-            open_.remove(o)
-        if taken >= MAX_TRADES or realized <= -CAPITAL * DAILY_CAP_PCT / 100:
-            break
-        per_share = abs(s["entry"] - s["stop"])
-        qty = min(int((CAPITAL * RISK_PCT / 100) // per_share), int(max(cash, 0) // (s["entry"] * (1 + side_cost_pct / 100))))
-        if qty < 1:
+    loss_limit = CAPITAL * DAILY_CAP_PCT / 100.0
+
+    # Build a single event timeline. Intraday marks are processed before entries
+    # at the same timestamp, so a breach cannot be ignored by a simultaneous signal.
+    events = []
+    for idx, signal in enumerate(signals):
+        for ts, price in signal.get("mark_path", []):
+            events.append((ts, 0, "mark", idx, float(price)))
+        events.append((signal["entry_time"], 1, "entry", idx, None))
+        events.append((signal["exit_time"], 2, "exit", idx, None))
+    events.sort(key=lambda event: (event[0], event[1]))
+
+    marked_prices = {}
+    realized_pnl = 0.0
+    halted = False
+    for ts, _, kind, idx, price in events:
+        signal = signals[idx]
+        key = idx
+
+        if kind == "mark":
+            if key in open_:
+                marked_prices[key] = price
+            # Check total daily P&L against all open positions at every available mark.
+            marked_pnl = realized_pnl
+            for open_key, trade in open_.items():
+                mark = marked_prices.get(open_key, trade["entry"])
+                side = trade["side"]
+                # Mark the open position at an estimated adverse exit fill, matching bot.py.
+                mark_exit_fill = mark * (1 - side * SLIPPAGE_PCT / 100.0)
+                gross_unrealized = (mark_exit_fill - trade["entry"]) * trade["qty"] * side
+                exit_notional = max(0.0, trade["value"] + gross_unrealized * side)
+                exit_fee = exit_notional * side_cost_pct / 100.0
+                marked_pnl += gross_unrealized - trade["entry_fee"] - exit_fee
+            if marked_pnl <= -loss_limit:
+                halted = True
             continue
-        value = qty * s["entry"]
-        gross = (s["exit_fill"] - s["entry"]) * qty * s["side"]
-        entry_fee = value * side_cost_pct / 100
-        exit_fee = max(0.0, (value + gross * s["side"])) * side_cost_pct / 100
-        net = gross - entry_fee - exit_fee
-        cash -= value + entry_fee
-        if cash < -1e-6:
-            raise RuntimeError("cash went negative: sizing bug")
-        taken += 1
-        t = {"symbol": s["symbol"], "net": net, "gross": gross, "value": value,
-             "entry_fee": entry_fee, "exit_fee": exit_fee,
-             "exit_time": s["exit_time"], "reason": s["reason"], "side": s["side"]}
-        open_.append(t)
-        trades.append(t)
+
+        if kind == "entry":
+            if halted or taken >= MAX_TRADES:
+                continue
+            per_share = abs(signal["entry"] - signal["stop"])
+            if per_share <= 0:
+                continue
+            qty_by_risk = int((CAPITAL * RISK_PCT / 100) // per_share)
+            qty_by_cash = int(max(cash, 0) // (signal["entry"] * (1 + side_cost_pct / 100)))
+            qty = min(qty_by_risk, qty_by_cash)
+            if qty < 1:
+                continue
+            value = qty * signal["entry"]
+            entry_fee = value * side_cost_pct / 100.0
+            cash -= value + entry_fee
+            if cash < -1e-6:
+                raise RuntimeError("cash went negative: sizing bug")
+            taken += 1
+            trade = {
+                "symbol": signal["symbol"], "net": 0.0, "gross": 0.0,
+                "value": value, "entry_fee": entry_fee, "exit_fee": 0.0,
+                "exit_time": signal["exit_time"], "reason": signal["reason"],
+                "side": signal["side"], "qty": qty, "entry": signal["entry"],
+                "entry_time": signal["entry_time"], "day": signal.get("day"),
+            }
+            open_[key] = trade
+            marked_prices[key] = signal["entry"]
+            trades.append(trade)
+            continue
+
+        if kind == "exit" and key in open_:
+            trade = open_.pop(key)
+            gross = (signal["exit_fill"] - trade["entry"]) * trade["qty"] * trade["side"]
+            exit_notional = max(0.0, trade["value"] + gross * trade["side"])
+            exit_fee = exit_notional * side_cost_pct / 100.0
+            net = gross - trade["entry_fee"] - exit_fee
+            trade.update({"gross": gross, "exit_fee": exit_fee, "net": net})
+            cash += trade["value"] + gross - exit_fee
+            realized_pnl += net
+            marked_prices.pop(key, None)
+
     return trades
 
 

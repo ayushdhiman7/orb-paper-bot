@@ -1,6 +1,6 @@
 // Caches the app shell so the dashboard opens offline. Trade data is never cached here;
-// the page keeps its own last-good copy in localStorage.
-const CACHE = "orb-shell-v5";
+// private trade data is fetched only after authentication and is not cached by the service worker.
+const CACHE = "orb-shell-v6";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

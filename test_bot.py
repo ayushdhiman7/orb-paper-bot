@@ -69,3 +69,138 @@ def test_round_trip_cost_is_split_between_sides():
     notional = 10_000
     assert bot.fee_for_notional(notional) == pytest.approx(5.0)
     assert 2 * bot.fee_for_notional(notional) == pytest.approx(10.0)
+
+
+def test_daily_cap_halts_new_entries_when_open_position_has_no_mark():
+    pos = bot.Position(
+        "TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW, entry_fee=0.5
+    )
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5,
+        day_pnl=-0.5,
+        positions={"TEST": pos},
+        last_prices={},
+    )
+    bot.check_daily_cap(state)
+    assert state.halted is True
+
+
+def test_quote_failure_invalidates_previous_mark(monkeypatch):
+    pos = bot.Position(
+        "TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW, entry_fee=0.5
+    )
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5,
+        day_pnl=-0.5,
+        positions={"TEST": pos},
+        last_prices={"TEST": 100.0},
+    )
+    monkeypatch.setattr(bot, "last_price", lambda symbol: None)
+    bot.manage_positions(state, NOW)
+    assert "TEST" not in state.last_prices
+    bot.check_daily_cap(state)
+    assert state.halted is True
+
+
+class _FakeQuery:
+    def __init__(self, rows=None, error=None):
+        self.rows = rows or []
+        self.error = error
+
+    def select(self, *_args):
+        return self
+
+    def eq(self, *_args):
+        return self
+
+    def limit(self, *_args):
+        return self
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return type("Result", (), {"data": self.rows})()
+
+
+class _FakeSupabase:
+    def __init__(self, rows=None, error=None):
+        self.query = _FakeQuery(rows, error)
+
+    def table(self, _name):
+        return self.query
+
+
+def test_startup_refuses_to_run_without_supabase(monkeypatch):
+    monkeypatch.setattr(bot, "SB", None)
+    with pytest.raises(RuntimeError, match="Supabase persistence is required"):
+        bot.assert_safe_startup()
+
+
+def test_startup_refuses_when_previous_run_left_open_paper_trade(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase([{"id": 1, "symbol": "RELIANCE.NS"}]))
+    with pytest.raises(RuntimeError, match="existing open paper trade"):
+        bot.assert_safe_startup()
+
+
+def test_startup_refuses_when_open_trade_check_fails(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase(error=OSError("offline")))
+    with pytest.raises(RuntimeError, match="Cannot verify existing open paper trades"):
+        bot.assert_safe_startup()
+
+
+def test_startup_allows_clean_paper_trade_table(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase())
+    bot.assert_safe_startup()
+
+
+
+def test_entry_is_cancelled_when_supabase_persistence_fails(monkeypatch):
+    state = bot.State(ranges={"TEST": (99.0, 98.0)})
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.0)
+    monkeypatch.setattr(bot, "LLM_MODE", "off")
+    monkeypatch.setattr(bot, "log_entry", lambda _pos: (_ for _ in ()).throw(
+        RuntimeError("Supabase insert failed")
+    ))
+
+    bot.try_entry(state, "TEST", NOW)
+
+    assert state.halted is True
+    assert state.positions == {}
+    assert state.trades_today == 0
+    assert state.cash == pytest.approx(bot.CAPITAL)
+
+
+def test_close_persistence_failure_retains_position_and_ledger(monkeypatch):
+    pos = bot.Position("TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW,
+                       row_id=123, entry_fee=0.5)
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5, day_pnl=-0.5,
+        positions={"TEST": pos}, last_prices={"TEST": 100.0},
+    )
+    monkeypatch.setattr(bot, "log_trade", lambda *_a, **_k: (_ for _ in ()).throw(
+        RuntimeError("Supabase close failed")
+    ))
+
+    closed = bot.close_position(state, "TEST", 98.0, "stop_loss", NOW)
+
+    assert closed is False
+    assert state.halted is True
+    assert state.positions["TEST"] is pos
+    assert state.cash == pytest.approx(bot.CAPITAL - 1000.5)
+    assert state.day_pnl == pytest.approx(-0.5)
+
+
+def test_mark_persistence_failure_halts_new_entries_but_keeps_position(monkeypatch):
+    pos = bot.Position("TEST", "BUY", 10, 100.0, 90.0, 120.0, NOW,
+                       row_id=123, entry_fee=0.5)
+    state = bot.State(positions={"TEST": pos}, last_prices={"TEST": 100.0})
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.0)
+    monkeypatch.setattr(bot, "log_price", lambda *_a: (_ for _ in ()).throw(
+        RuntimeError("Supabase update failed")
+    ))
+
+    bot.manage_positions(state, NOW)
+
+    assert state.halted is True
+    assert state.positions["TEST"] is pos
+    assert state.last_prices["TEST"] == pytest.approx(101.0)
