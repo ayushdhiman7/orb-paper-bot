@@ -106,7 +106,7 @@ def log_entry(pos):
             "last_price": round(pos.entry, 2), "last_price_ts": pos.opened_at.isoformat(),
             **({"llm_decision": pos.llm_decision, "llm_reason": pos.llm_reason} if pos.llm_decision else {}),
             "status": "open", "mode": "paper",
-        }).execute()
+        }).select("id").execute()
         rows = getattr(res, "data", None) or []
         if not rows or rows[0].get("id") is None:
             raise RuntimeError("Supabase did not return the inserted paper trade ID.")
