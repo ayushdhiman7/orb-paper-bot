@@ -198,7 +198,7 @@ def size_position(price: float, stop: float, cash: float = None) -> int:
         return 0
     qty_by_risk = int(risk_cash // per_share_risk)
     available = CAPITAL if cash is None else cash   # cash NOT already tied up in open positions
-    qty_by_cash = int(max(0.0, available) // price)  # no leverage, keeps it honest
+    qty_by_cash = int(max(0.0, available) // (price * (1 + COST_PCT / 2 / 100)))  # reserve entry fee too
     return max(0, min(qty_by_risk, qty_by_cash))
 
 
