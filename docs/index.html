@@ -191,7 +191,7 @@ const shortDay = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN
 // ---------- derived data ----------
 function split(all) {
   const open = all.filter((t) => t.status === "open");
-  const closed = all.filter((t) => t.status !== "open").sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const closed = all.filter((t) => t.status !== "open" && !t.exit_estimated).sort((a, b) => new Date(a.ts) - new Date(b.ts));
   return { open, closed };
 }
 function unrealised(t) {

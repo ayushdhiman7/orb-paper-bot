@@ -36,3 +36,7 @@ create policy "public read backtest_runs" on backtest_runs for select to anon us
 
 -- The static dashboard reads these tables with the publishable/anon key.
 grant select on table paper_trades, backtest_runs to anon;
+
+-- Estimated/reconstructed exits are kept for audit but excluded from confirmed performance metrics.
+alter table paper_trades add column if not exists exit_estimated boolean not null default false;
+alter table paper_trades add column if not exists exit_source text;
