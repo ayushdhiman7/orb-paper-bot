@@ -91,7 +91,7 @@ def test_no_ai_control_finishes_independently_after_real_trade_closes():
     assert row["ai_reason"] == "weak breakout"
     assert row["exit_reason"] == "target"
     assert row["signal_id"] == "T:2026-10-29T10:00:00"
-    assert row["pnl"] == pytest.approx((101.5 - 100.0) * 10 - 0.5 - 1015.0 * 0.0005)
+    assert row["pnl"] == pytest.approx(round((101.5 - 100.0) * 10 - 0.5 - 1015.0 * 0.0005, 2))
 
 
 def test_no_ai_control_supports_sell_stop_and_squareoff():
