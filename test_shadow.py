@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 
 import bot
-from shadow import ShadowLedger
+from shadow import NoAIControlLedger, ShadowLedger
 
 NOW = datetime(2026, 10, 29, 10, 0)
 
@@ -72,3 +72,51 @@ def test_ai_exit_reason_is_kept_for_review():
     L.ai_exit("T", 100.2, NOW, "momentum fading on falling volume")
     r = {x["variant"]: x for x in L.close("T", 101.0, 8.0, NOW)}
     assert r["ai_exit"]["exit_reason"] == "ai_exit: momentum fading on falling volume"
+
+def test_no_ai_control_finishes_independently_after_real_trade_closes():
+    control = NoAIControlLedger(lambda n: n * 0.0005, lambda p, d, e: p)
+    pos = bot.Position("T", "BUY", 10, 100.0, 99.0, 101.5, NOW,
+                       row_id=None, entry_fee=0.5)
+    control.open("T", pos, "T:2026-10-29T10:00:00", "skip", "weak breakout")
+    # The real AI-managed trade may close at a different time; that must not delete this control.
+    real = mk()
+    real.close("T", 100.2, 1.0, NOW)
+    assert "T" in control.tracks
+    rows = control.tick("T", 101.5, NOW)
+    assert "T" not in control.tracks
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["variant"] == "no_ai_control"
+    assert row["ai_decision"] == "skip"
+    assert row["ai_reason"] == "weak breakout"
+    assert row["exit_reason"] == "target"
+    assert row["signal_id"] == "T:2026-10-29T10:00:00"
+    assert row["pnl"] == pytest.approx((101.5 - 100.0) * 10 - 0.5 - 1015.0 * 0.0005)
+
+
+def test_no_ai_control_supports_sell_stop_and_squareoff():
+    control = NoAIControlLedger(lambda n: 0.0, lambda p, d, e: p)
+    pos = bot.Position("T", "SELL", 2, 100.0, 101.0, 98.5, NOW, entry_fee=0.0)
+    control.open("T", pos, "signal-2", "take", "accepted")
+    assert control.tick("T", 100.5, NOW) == []
+    rows = control.close_all({"T": 100.5}, NOW)
+    assert rows[0]["exit_reason"] == "square_off"
+    assert rows[0]["side"] == "SELL"
+    assert rows[0]["pnl"] == pytest.approx(-1.0)
+    assert control.tracks == {}
+
+
+def test_ai_skipped_entry_still_opens_no_ai_control(monkeypatch):
+    bot.CONTROL_LEDGER = NoAIControlLedger(bot.fee_for_notional, bot.adverse_fill)
+    state = bot.State(ranges={"TEST": (100.0, 99.0)})
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.0)
+    monkeypatch.setattr(bot, "LLM_MODE", "gate")
+    monkeypatch.setattr(bot, "ask_ai", lambda *args: {"decision": "skip", "reason": "weak volume"})
+    monkeypatch.setattr(bot, "log_entry", lambda _pos: pytest.fail("AI-skipped entry must not be persisted as real"))
+    bot.try_entry(state, "TEST", NOW)
+    assert state.positions == {}
+    assert state.trades_today == 0
+    assert "TEST" in bot.CONTROL_LEDGER.tracks
+    assert bot.CONTROL_LEDGER.tracks["TEST"].ai_decision == "skip"
+    assert bot.CONTROL_LEDGER.tracks["TEST"].ai_reason == "weak volume"
+
