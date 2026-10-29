@@ -21,6 +21,8 @@ alter table paper_trades alter column pnl drop not null;
 alter table paper_trades add column if not exists status text not null default 'closed';
 alter table paper_trades add column if not exists last_price numeric;
 alter table paper_trades add column if not exists last_price_ts timestamptz;
+alter table paper_trades add column if not exists llm_decision text;
+alter table paper_trades add column if not exists llm_reason text;
 create policy "public read paper_trades" on paper_trades for select to anon using (true);
 
 create table if not exists backtest_runs (
