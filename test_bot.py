@@ -83,3 +83,20 @@ def test_daily_cap_halts_new_entries_when_open_position_has_no_mark():
     )
     bot.check_daily_cap(state)
     assert state.halted is True
+
+
+def test_quote_failure_invalidates_previous_mark(monkeypatch):
+    pos = bot.Position(
+        "TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW, entry_fee=0.5
+    )
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5,
+        day_pnl=-0.5,
+        positions={"TEST": pos},
+        last_prices={"TEST": 100.0},
+    )
+    monkeypatch.setattr(bot, "last_price", lambda symbol: None)
+    bot.manage_positions(state, NOW)
+    assert "TEST" not in state.last_prices
+    bot.check_daily_cap(state)
+    assert state.halted is True
