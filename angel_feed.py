@@ -40,6 +40,18 @@ def _env(kind):
     return ""
 
 
+def silence_sdk_logging():
+    """The SmartAPI SDK logs full request headers on any error, including the API key and the Bearer token.
+    Keep those lines out of the logs (journald keeps them for weeks)."""
+    import logging
+    logging.getLogger("logzero_default").setLevel(logging.CRITICAL)
+    try:
+        from logzero import logger
+        logger.setLevel(logging.CRITICAL)
+    except Exception:
+        pass
+
+
 def base_name(symbol):
     return symbol.split(".")[0].upper()
 
@@ -70,6 +82,7 @@ class AngelFeed:
         except ImportError:
             self.last_error = "smartapi-python / pyotp not installed"
             return False
+        silence_sdk_logging()
         try:
             api = SmartConnect(api_key=_env("key"))
             res = api.generateSession(_env("client"), _env("pin"), pyotp.TOTP(_env("totp")).now())

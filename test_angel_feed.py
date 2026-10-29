@@ -106,3 +106,10 @@ assert bot.compute_opening_range("RELIANCE.NS") == (1200.0, 1100.0)   # pure Yah
 bot.datetime = real_now
 print("bot integration OK")
 print("ALL ANGEL FEED TESTS PASSED")
+
+# the SDK's header-dumping logger must be silenced
+import logging
+import angel_feed as _af
+_af.silence_sdk_logging()
+assert logging.getLogger("logzero_default").level == logging.CRITICAL
+print("sdk logging silenced OK")

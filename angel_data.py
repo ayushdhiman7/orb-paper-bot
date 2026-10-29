@@ -87,6 +87,8 @@ class AngelClient:
             from SmartApi import SmartConnect
         except ImportError:
             raise AngelError("Install extras first: pip install -r requirements-angelone-test.txt")
+        from angel_feed import silence_sdk_logging
+        silence_sdk_logging()
         api = SmartConnect(api_key=os.environ["ANGEL_API_KEY"])
         totp = pyotp.TOTP(os.environ["ANGEL_TOTP_SECRET"]).now()
         res = api.generateSession(os.environ["ANGEL_CLIENT_CODE"], os.environ["ANGEL_PIN"], totp)
