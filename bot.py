@@ -3,7 +3,7 @@ Opening-Range-Breakout PAPER trading bot for NSE stocks.
 
 - Data: yfinance (free, ~15 min delayed for NSE, fine for paper testing).
 - Orders: simulated only. No broker connection, no real money.
-- Logging: Supabase (optional). Falls back to local CSV if keys are missing.
+- Logging: Supabase is required for safe startup and durable paper-trade state.
 """
 import csv
 import os
