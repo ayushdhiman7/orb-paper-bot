@@ -41,7 +41,8 @@ OPEN, SQUARE_OFF, NO_NEW = dtime(9, 15), dtime(15, 15), dtime(14, 30)
 BAR = timedelta(minutes=5)
 
 DEFAULT_OPTS = {"range_min": 15, "vol_mult": None, "gap": False, "long_only": False,
-                "min_rng": None, "max_rng": None, "slip_pct": None}
+                "min_rng": None, "max_rng": None, "slip_pct": None,
+                "min_break": None, "exit_rule": None}
 
 # Variants tried by the lab. Kept small on purpose: every extra variant tried on the same 60 days
 # raises the odds that one looks good by luck.
@@ -53,7 +54,28 @@ VARIANTS = [
     ("Long only", {"long_only": True}),
     ("Volume spike + gap", {"vol_mult": 1.5, "gap": True}),
     ("Skip wide ranges (>1%)", {"max_rng": 1.0}),
+    # Phase 3 research variants (same entries as the baseline; nothing here is enabled in the live bot)
+    ("Breakout buffer 0.1%", {"min_break": 0.1}),
+    ("Breakout buffer 0.2%", {"min_break": 0.2}),
+    ("Exit: break-even after 1R", {"exit_rule": "breakeven_1R"}),
+    ("Exit: give back 50% after 1R", {"exit_rule": "giveback_50"}),
+    ("Exit: trail 1R after 1R", {"exit_rule": "trail_1R"}),
 ]
+
+
+def effective_stop(rule, side, entry, stop, peak):
+    """Stop level for a frozen-baseline trade under an alternative exit rule, from the best price seen so far.
+    The rule only engages once the trade has been 1R in profit; the original stop always stays in force."""
+    if not rule:
+        return stop
+    risk = abs(entry - stop)
+    best = (peak - entry) * side
+    if best < risk:
+        return stop
+    level = {"breakeven_1R": entry,
+             "giveback_50": entry + side * best / 2,
+             "trail_1R": peak - side * risk}[rule]
+    return max(stop, level) if side == 1 else min(stop, level)
 
 
 def load_data(symbols):
@@ -119,6 +141,8 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
         side = 1 if close > hi else -1 if close < lo else 0
         if not side:
             continue
+        if o["min_break"] and abs(close - (hi if side == 1 else lo)) / (hi if side == 1 else lo) * 100 < o["min_break"]:
+            continue
         if o["long_only"] and side == -1:
             continue
         if o["gap"] and (gap is None or (side == 1 and gap <= 0) or (side == -1 and gap >= 0)):
@@ -132,13 +156,18 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
         target = entry + side * abs(entry - stop) * rr
         exit_price, reason, exit_ts = None, "square_off", ts
         mark_path = []
+        peak = entry
+        base_stop = stop
         for j in range(i + 1, len(after)):
             r2, ts2 = after.iloc[j], after.index[j]
             exit_ts = ts2
             mark_price = float(r2["Close"])
+            # exit rule uses only the best price from PRIOR bars; this bar's favourable move is added after the checks
+            stop = effective_stop(o["exit_rule"], side, entry, base_stop, peak)
+            stop_reason = "stop" if stop == base_stop else o["exit_rule"]
             if side == 1:
                 if r2["Low"] <= stop:
-                    exit_price, reason = stop, "stop"
+                    exit_price, reason = stop, stop_reason
                     mark_price = stop
                     mark_path.append((ts2 + BAR, mark_price))
                     break
@@ -149,7 +178,7 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
                     break
             else:
                 if r2["High"] >= stop:
-                    exit_price, reason = stop, "stop"
+                    exit_price, reason = stop, stop_reason
                     mark_price = stop
                     mark_path.append((ts2 + BAR, mark_price))
                     break
@@ -159,11 +188,12 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
                     mark_path.append((ts2 + BAR, mark_price))
                     break
             mark_path.append((ts2 + BAR, mark_price))
+            peak = max(peak, float(r2["High"])) if side == 1 else min(peak, float(r2["Low"]))
         if exit_price is None:
             exit_price = float(after.iloc[-1]["Close"]) if len(after) > i + 1 else close
             exit_ts = after.index[-1] if len(after) > i + 1 else ts
         exit_fill = exit_price * (1 - side * slip)
-        return {"symbol": symbol, "side": side, "entry": entry, "stop": stop, "exit_fill": exit_fill,
+        return {"symbol": symbol, "side": side, "entry": entry, "stop": base_stop, "exit_fill": exit_fill,
                 "reason": reason, "entry_time": ts + BAR, "exit_time": exit_ts + BAR,
                 "mark_path": mark_path}
     return None

@@ -227,6 +227,20 @@ function aiCard(closed) {
     <table><thead><tr><th>AI said</th><th>Trades</th><th>Win</th><th>Net P&amp;L</th></tr></thead><tbody>${row("Take", g.take)}${row("Skip", g.skip)}</tbody></table>
     <p class="note">The AI only advises: trades are taken either way unless the bot is in gate mode. Wait for 30 or more trades before judging whether it adds anything.</p></div>`;
 }
+function shadowCard() {
+  const rows = state.shadow || [];
+  if (!rows.length) return "";
+  const names = { breakeven_1R: "Break-even after 1R", giveback_50: "Give back 50% after 1R", trail_1R: "Trail 1R after 1R", ai_exit: "AI exit advice" };
+  const g = {};
+  rows.forEach((r) => { (g[r.variant] = g[r.variant] || []).push(r); });
+  const body = Object.keys(names).filter((k) => g[k]).map((k) => {
+    const a = g[k], v = a.reduce((x, r) => x + Number(r.pnl), 0), b = a.reduce((x, r) => x + Number(r.baseline_pnl), 0);
+    return `<tr><td>${names[k]}</td><td>${a.length}</td><td class="${cls(v)}">${inr(v)}</td><td class="${cls(b)}">${inr(b)}</td><td class="${cls(v - b)}">${inr(v - b)}</td></tr>`;
+  }).join("");
+  return `<div class="card"><h2>Shadow ledger (what-if exits)</h2>
+    <table><thead><tr><th>Rule</th><th>Trades</th><th>What-if P&amp;L</th><th>Actual</th><th>Difference</th></tr></thead><tbody>${body}</tbody></table>
+    <p class="note">Same entries, prices and costs as the real paper trades. Recorded only; nothing here changes a trade. Rules are not switched on until they have 2 to 4 months of evidence.</p></div>`;
+}
 function emptyBox(msg) { return `<div class="empty">${esc(msg)}</div>`; }
 
 function lineChart(closed) {
@@ -349,6 +363,7 @@ function renderStocks() {
     ${chips("side", "Side", [["all", "All"], ["BUY", "Buy"], ["SELL", "Sell"]])}
     ${chips("reason", "Exit", [["all", "All"]].concat(reasons.map((r) => [r, r])))}
     ${aiCard(closed)}
+    ${shadowCard()}
     <div class="card"><h2>By stock</h2>${table.length ? `<table><thead><tr><th>Stock</th><th>Trades</th><th>Win</th><th>Net P&amp;L</th></tr></thead><tbody>${table.map((r) =>
       `<tr><td class="sym">${esc(r.k)}</td><td>${r.n}</td><td>${Math.round(r.winRate)}%</td><td class="${cls(r.total)}">${inr(r.total)}</td></tr>`).join("")}</tbody></table>` : emptyBox("No closed trades match these filters.")}</div>
     <div class="card"><h2>Trades (${rows.length})</h2>${rows.length ? [...rows].reverse().slice(0, 50).map(tradeRow).join("") : emptyBox("No trades to list.")}</div>`;
@@ -437,10 +452,12 @@ async function get(path) {
 async function load() {
   const btn = $("refresh");
   btn.disabled = true;
-  const [tr, bt] = await Promise.allSettled([
+  const [tr, bt, sh] = await Promise.allSettled([
     get("paper_trades?select=*&order=ts.desc&limit=2000"),
     get("backtest_runs?select=*&order=created_at.desc&limit=10"),
+    get("shadow_trades?select=*&order=ts.desc&limit=2000"),
   ]);
+  state.shadow = sh.status === "fulfilled" ? sh.value : [];
   if (tr.status === "fulfilled") {
     state.trades = tr.value;
     if (bt.status === "fulfilled") {
