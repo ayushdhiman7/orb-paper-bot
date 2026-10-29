@@ -74,3 +74,8 @@ Yahoo prices are about 15 minutes late. Set `DATA_SOURCE=angel` in `.env` and th
 
 ## Shadow ledger and evidence rules
 The baseline strategy is frozen. `shadow.py` replays every real paper trade against alternative exits (break-even after 1R, 50% give-back, 1R trailing stop, and the AI's shadow "exit" advice) using the same entries, prices and cost model, and saves one row per variant in `shadow_trades` (create the table with `schema.sql`). Shadow rows never change a real trade, and a failed shadow write never affects the baseline. No variant is enabled until it has 2-4 months of prospective evidence in addition to historical backtests. `AI_EXITS=shadow` logs AI advice only. Angel One historical candles are checked separately from live quotes with `python angel_data.py` (one careful request; it stops on a rate block).
+
+## Telegram alerts and watchdog
+`notify.py` sends a Telegram message for every entry, exit and halt (loss cap, missing price, database write failure). `watchdog.py` runs every 5 minutes from its own systemd timer, so it still works when the bot is dead, and alerts once if the bot is not running or an open trade's price has not updated for 10 minutes (and once more when it recovers). Without the two Telegram values in `.env` everything is a silent no-op.
+
+Setup: in Telegram talk to @BotFather, send `/newbot`, copy the token. Send any message to your new bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `"chat":{"id":...}`. Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` (never in chat), then run `bash deploy/install.sh` once to install the watchdog timer.

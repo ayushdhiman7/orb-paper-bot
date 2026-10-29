@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ORB watchdog every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Unit=orb-watchdog.service
+
+[Install]
+WantedBy=timers.target

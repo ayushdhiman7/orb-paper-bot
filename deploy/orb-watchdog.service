@@ -1,0 +1,9 @@
+[Unit]
+Description=ORB bot health watchdog (Telegram alert if the bot stops or stalls)
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+EnvironmentFile=-__DIR__/.env
+ExecStart=__DIR__/.venv/bin/python -u watchdog.py

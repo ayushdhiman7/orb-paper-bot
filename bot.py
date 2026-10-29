@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 import llm_gate
+import notify
 from shadow import ShadowLedger
 from angel_feed import AngelFeed
 
@@ -345,6 +346,7 @@ def try_entry(state: State, symbol: str, now: datetime):
     except RuntimeError as exc:
         state.halted = True
         print(f"[HALT] {exc} No new entries until persistence is repaired.")
+        notify.send(f"HALT: could not save the {symbol} entry to Supabase. No new entries. {exc}", once_key="halt-entry-write")
         return
     state.positions[symbol] = pos
     LEDGER.open(symbol, pos)
@@ -353,6 +355,7 @@ def try_entry(state: State, symbol: str, now: datetime):
     state.day_pnl -= entry_fee
     state.last_prices[symbol] = price
     print(f"[ENTRY] {side} {qty} {symbol} @ {entry_price:.2f} SL {stop:.2f} TP {target:.2f} (fee {entry_fee:.2f})")
+    notify.send(f"ENTRY {side} {qty} {symbol} @ {entry_price:.2f} | SL {stop:.2f} TP {target:.2f}")
 
 
 def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
@@ -373,6 +376,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     except RuntimeError as exc:
         state.halted = True
         print(f"[HALT] {exc}")
+        notify.send(f"HALT: could not save the close of {symbol}. Position kept open in memory; check the bot.", once_key="halt-close-write")
         return False
     state.positions.pop(symbol)
     state.day_pnl += gross - exit_fee  # entry fee was booked when the position opened
@@ -380,6 +384,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     state.done_symbols.add(symbol)
     print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
     log_shadow(LEDGER.close(symbol, price, round(trade_net_pnl, 2), now))
+    notify.send(f"EXIT {symbol} @ {exit_fill:.2f} ({reason}) net P&L {trade_net_pnl:+.2f}")
     return True
 
 
@@ -398,6 +403,7 @@ def manage_positions(state: State, now: datetime):
         except RuntimeError as exc:
             state.halted = True
             print(f"[HALT] {exc} No new entries; position management continues.")
+            notify.send("HALT: Supabase price updates are failing. No new entries; positions still managed.", once_key="halt-price-write")
         better = (lambda a, b: a > b) if pos.side == "BUY" else (lambda a, b: a < b)
         if pos.peak is None or better(price, pos.peak):
             pos.peak = price
@@ -444,12 +450,14 @@ def check_daily_cap(state: State):
     if unmarked and not state.halted:
         state.halted = True
         print(f"[HALT] Missing mark price for open position(s): {', '.join(unmarked)}. No new trades today.")
+        notify.send(f"HALT: no price for open position(s) {', '.join(unmarked)}. No new trades today.", once_key="halt-mark")
         return
 
     marked_pnl = marked_day_pnl(state)
     if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
         state.halted = True
         print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
+        notify.send(f"HALT: daily loss cap hit (P&L {marked_pnl:+.2f}). No new trades today.", once_key="halt-cap")
 
 
 def _row_day(row):
@@ -536,6 +544,7 @@ def run():
     assert_safe_startup()
     state = restore_state(datetime.now(IST))
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
+    notify.send(f"Paper bot started | capital Rs {CAPITAL:.0f} | data source {DATA_SOURCE}", once_key="started")
     if DATA_SOURCE == "angel":
         feed = AngelFeed(SYMBOLS)
         if feed.login():
