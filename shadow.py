@@ -98,3 +98,89 @@ class ShadowLedger:
                          "exit_reason": s.exit_reason, "pnl": round(pnl, 2), "baseline_pnl": baseline_pnl,
                          "ts": (s.exit_ts or now).isoformat()})
         return rows
+
+@dataclass
+class _ControlTrack:
+    """A no-AI control trade that is independent of the actual AI-managed position."""
+    signal_id: str
+    side: str
+    qty: int
+    entry: float
+    stop: float
+    target: float
+    entry_fee: float
+    opened_at: object
+    ai_decision: str
+    ai_reason: str
+    trade_id: object = None
+
+
+class NoAIControlLedger:
+    """Replay every eligible signal with original stop/target, independent of AI decisions/exits.
+
+    Control tracks are not removed when the real paper trade closes. They finish only at their
+    own stop, target, or the explicit end-of-session square-off.
+    """
+    def __init__(self, fee_fn, fill_fn):
+        self.fee_fn, self.fill_fn = fee_fn, fill_fn
+        self.tracks = {}
+
+    def open(self, symbol, pos, signal_id, ai_decision=None, ai_reason=None):
+        self.tracks[symbol] = _ControlTrack(
+            signal_id=signal_id, side=pos.side, qty=pos.qty, entry=pos.entry,
+            stop=pos.stop, target=pos.target, entry_fee=pos.entry_fee,
+            opened_at=pos.opened_at, ai_decision=ai_decision or "not_available",
+            ai_reason=(ai_reason or "")[:200], trade_id=pos.row_id,
+        )
+
+    def link_trade(self, symbol, trade_id):
+        track = self.tracks.get(symbol)
+        if track is not None:
+            track.trade_id = trade_id
+
+    def _finish(self, symbol, price, reason, now):
+        t = self.tracks.pop(symbol, None)
+        if t is None:
+            return []
+        direction = 1 if t.side == "BUY" else -1
+        fill = self.fill_fn(price, direction, False)
+        pnl = (fill - t.entry) * t.qty * direction - t.entry_fee - self.fee_fn(t.qty * fill)
+        return [{
+            "trade_id": t.trade_id,
+            "signal_id": t.signal_id,
+            "symbol": symbol,
+            "variant": "no_ai_control",
+            "side": t.side,
+            "qty": t.qty,
+            "entry_price": round(t.entry, 2),
+            "exit_price": round(fill, 2),
+            "entry_ts": t.opened_at.isoformat(),
+            "exit_reason": reason,
+            "ai_decision": t.ai_decision,
+            "ai_reason": t.ai_reason,
+            "pnl": round(pnl, 2),
+            "baseline_pnl": None,
+            "ts": now.isoformat(),
+        }]
+
+    def tick(self, symbol, price, now):
+        t = self.tracks.get(symbol)
+        if t is None:
+            return []
+        if (t.side == "BUY" and price <= t.stop) or (t.side == "SELL" and price >= t.stop):
+            return self._finish(symbol, price, "stop_loss", now)
+        if (t.side == "BUY" and price >= t.target) or (t.side == "SELL" and price <= t.target):
+            return self._finish(symbol, price, "target", now)
+        return []
+
+    def close(self, symbol, price, now, reason="square_off"):
+        return self._finish(symbol, price, reason, now)
+
+    def close_all(self, prices, now, reason="square_off"):
+        rows = []
+        for symbol in list(self.tracks):
+            price = prices.get(symbol)
+            if price is not None:
+                rows.extend(self.close(symbol, price, now, reason))
+        return rows
+
