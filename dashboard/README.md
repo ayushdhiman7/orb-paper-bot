@@ -27,5 +27,7 @@ npm run preview
 
 The app currently reads `paper_trades` and completed `no_ai_control` rows from `shadow_trades`. Supabase RLS/grants must permit the intended read-only access. Dashboard metrics exclude open and estimated-exit records from realized P&L.
 
+**Security note:** Do not create an unrestricted `anon` SELECT policy for personal trading records. The connected project currently reports RLS enabled without SELECT policies on `paper_trades` and `backtest_runs`; browser requests may therefore return no rows. Configure authenticated, owner-restricted access before expecting real records. The dashboard intentionally does not change database policies or expose service-role credentials.
+
 ## Deployment status
 This app is being built separately from the currently published `docs/` dashboard. GitHub Pages deployment will be switched only after the new build and data reads are verified.
