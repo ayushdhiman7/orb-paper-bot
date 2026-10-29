@@ -153,6 +153,7 @@ class NoAIControlLedger:
             "side": t.side,
             "qty": t.qty,
             "entry_price": round(t.entry, 2),
+            "entry_fee": round(t.entry_fee, 2),
             "exit_price": round(fill, 2),
             "entry_ts": t.opened_at.isoformat(),
             "exit_reason": reason,
