@@ -381,9 +381,40 @@ def check_daily_cap(state: State):
         print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
 
 
+def assert_safe_startup():
+    """Refuse to start when paper-position state cannot be recovered safely.
+
+    The bot currently keeps position state in memory. Starting without durable
+    Supabase logging, or while Supabase still has open rows from a prior process,
+    could forget an existing paper position and bypass its risk controls.
+    """
+    if SB is None:
+        raise RuntimeError(
+            "Supabase persistence is required for safe startup; configure "
+            "SUPABASE_URL and SUPABASE_KEY before running the paper bot."
+        )
+    try:
+        result = (SB.table("paper_trades").select("id,symbol")
+                  .eq("status", "open").eq("mode", "paper").limit(20).execute())
+    except Exception as exc:
+        raise RuntimeError(
+            "Cannot verify existing open paper trades; refusing to start. "
+            "Check Supabase connectivity/schema and resolve the open positions first."
+        ) from exc
+    open_rows = result.data or []
+    if open_rows:
+        symbols = ", ".join(str(row.get("symbol", "unknown")) for row in open_rows)
+        raise RuntimeError(
+            f"Found existing open paper trade(s) ({symbols}); refusing to start "
+            "because in-memory positions cannot be restored automatically. "
+            "Reconcile/close these rows before restarting."
+        )
+
+
 # ---------------- Main loop ----------------
 def run():
     global FEED
+    assert_safe_startup()
     state = State()
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
     if DATA_SOURCE == "angel":
