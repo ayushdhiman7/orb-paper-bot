@@ -460,6 +460,7 @@ def manage_control_positions(state: State, now: datetime):
         price = state.last_prices.get(symbol) if symbol in state.positions else last_price(symbol)
         if price is None:
             continue
+        state.last_prices[symbol] = price  # also retain a fallback mark for skipped-entry controls
         log_control_rows(state, CONTROL_LEDGER.tick(symbol, price, now))
 
 
@@ -617,12 +618,15 @@ def run():
 
         if now.weekday() >= 5 or t < MARKET_OPEN or t > MARKET_CLOSE:
             print(f"{now:%H:%M} market closed, sleeping")
-            if t > MARKET_CLOSE and state.trades_today and not state.positions:
+            if t > MARKET_CLOSE:
+                close_control_positions(state, now)
+            if t > MARKET_CLOSE and state.trades_today and not state.positions and not CONTROL_LEDGER.tracks:
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
-                state = State()  # reset only after every position is confirmed closed
-            elif t > MARKET_CLOSE and state.positions:
+                state = State()  # reset only after real and hypothetical positions are confirmed closed
+            elif t > MARKET_CLOSE and (state.positions or CONTROL_LEDGER.tracks):
                 state.halted = True
-                print(f"[HALT] Position(s) still open after market close: {', '.join(sorted(state.positions))}. State retained; manual reconciliation required.")
+                unresolved = sorted(set(state.positions) | set(CONTROL_LEDGER.tracks))
+                print(f"[HALT] Unresolved real/control position(s) after market close: {', '.join(unresolved)}. State retained; manual reconciliation required.")
             time.sleep(30 if FEED is not None and t < MARKET_OPEN and now.weekday() < 5 else 300)
             continue
 
