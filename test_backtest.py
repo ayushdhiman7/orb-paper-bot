@@ -61,3 +61,32 @@ def test_daily_loss_cap_blocks_later_entries_after_open_short_loss(monkeypatch):
     trades = backtest.run_day(signals, cost_pct=0.0)
     assert [t["symbol"] for t in trades] == ["SHORT_LOSS"]
     assert trades[0]["net"] < -(backtest.CAPITAL * backtest.DAILY_CAP_PCT / 100.0)
+
+
+
+def test_backtest_long_and_short_net_matches_round_trip_accounting(monkeypatch):
+    monkeypatch.setattr(backtest, "CAPITAL", 14_000.0)
+    monkeypatch.setattr(backtest, "RISK_PCT", 1.0)
+    monkeypatch.setattr(backtest, "COST_PCT", 0.10)
+    monkeypatch.setattr(backtest, "SLIPPAGE_PCT", 0.0)
+    monkeypatch.setattr(backtest, "DAILY_CAP_PCT", 99.0)
+    monkeypatch.setattr(backtest, "MAX_TRADES", 3)
+    t0 = datetime(2026, 10, 29, 10, 0)
+
+    for side, exit_fill in ((1, 101.0), (-1, 99.0)):
+        signal = {
+            "symbol": f"SIDE_{side}", "side": side, "entry": 100.0,
+            "stop": 99.0 if side == 1 else 101.0, "exit_fill": exit_fill,
+            "reason": "fixture", "entry_time": t0,
+            "exit_time": t0 + timedelta(minutes=5),
+        }
+        trade = backtest.run_day([signal], cost_pct=0.10)[0]
+        entry_notional = trade["entry"] * trade["qty"]
+        exit_notional = trade["qty"] * exit_fill
+        entry_fee = entry_notional * 0.05 / 100.0
+        exit_fee = exit_notional * 0.05 / 100.0
+        gross = (exit_fill - trade["entry"]) * trade["qty"] * side
+        assert trade["gross"] == gross
+        assert trade["entry_fee"] == entry_fee
+        assert trade["exit_fee"] == exit_fee
+        assert trade["net"] == gross - entry_fee - exit_fee
