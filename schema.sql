@@ -47,6 +47,14 @@ create table if not exists shadow_trades (
   trade_id bigint, symbol text, variant text, exit_price numeric, exit_reason text,
   pnl numeric, baseline_pnl numeric, ts timestamptz
 );
+-- Independent no-AI control records, including signals the AI rejected and controls that outlive AI exits.
+alter table shadow_trades add column if not exists signal_id text;
+alter table shadow_trades add column if not exists side text;
+alter table shadow_trades add column if not exists qty integer;
+alter table shadow_trades add column if not exists entry_price numeric;
+alter table shadow_trades add column if not exists entry_ts timestamptz;
+alter table shadow_trades add column if not exists ai_decision text;
+alter table shadow_trades add column if not exists ai_reason text;
 alter table shadow_trades enable row level security;
 create policy "public read shadow_trades" on shadow_trades for select to anon using (true);
 grant select on table shadow_trades to anon;
