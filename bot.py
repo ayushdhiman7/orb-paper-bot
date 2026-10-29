@@ -86,6 +86,7 @@ class State:
     halted: bool = False
     last_prices: dict = field(default_factory=dict)
     control_trades_today: int = 0  # independent no-AI control's daily entry limit
+    control_cash: float = CAPITAL  # virtual cash reserved/settled independently of real paper trades
 
 
 # ---------------- Logging ----------------
@@ -346,8 +347,14 @@ def try_entry(state: State, symbol: str, now: datetime):
     # It follows its own max-trades/day limit and is never used to change real paper orders.
     signal_id = f"{symbol}:{now.isoformat()}"
     if state.control_trades_today < MAX_TRADES_PER_DAY:
-        CONTROL_LEDGER.open(symbol, pos, signal_id, decision, ai_reason)
-        state.control_trades_today += 1
+        control_qty = size_position(entry_price, stop, state.control_cash)
+        if control_qty >= 1:
+            control_fee = fee_for_notional(control_qty * entry_price)
+            control_pos = Position(symbol, side, control_qty, entry_price, stop, target, now,
+                                   entry_fee=control_fee)
+            CONTROL_LEDGER.open(symbol, control_pos, signal_id, decision, ai_reason)
+            state.control_cash -= control_qty * entry_price + control_fee
+            state.control_trades_today += 1
     if LLM_MODE == "gate" and review and review["decision"] == "skip":
         print(f"[skip] {symbol}: AI advised skipping; no-AI control continues hypothetically")
         state.done_symbols.add(symbol)
@@ -439,13 +446,21 @@ def manage_positions(state: State, now: datetime):
                     close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
 
 
+def log_control_rows(state: State, rows):
+    """Persist completed control outcomes and settle their independent virtual cash."""
+    for row in rows:
+        if row.get("variant") == "no_ai_control":
+            state.control_cash += (row["qty"] * row["entry_price"] + row["pnl"] + row["entry_fee"])
+    log_shadow(rows)
+
+
 def manage_control_positions(state: State, now: datetime):
     """Advance independent no-AI controls even when the real trade was skipped or already closed."""
     for symbol in list(CONTROL_LEDGER.tracks):
         price = state.last_prices.get(symbol) if symbol in state.positions else last_price(symbol)
         if price is None:
             continue
-        log_shadow(CONTROL_LEDGER.tick(symbol, price, now))
+        log_control_rows(state, CONTROL_LEDGER.tick(symbol, price, now))
 
 
 def close_control_positions(state: State, now: datetime):
@@ -457,7 +472,7 @@ def close_control_positions(state: State, now: datetime):
             price = state.last_prices.get(symbol)
         if price is not None:
             prices[symbol] = price
-    log_shadow(CONTROL_LEDGER.close_all(prices, now, "square_off"))
+    log_control_rows(state, CONTROL_LEDGER.close_all(prices, now, "square_off"))
 
 
 def marked_day_pnl(state: State) -> float:
