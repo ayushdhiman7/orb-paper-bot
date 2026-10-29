@@ -17,7 +17,7 @@ export type ControlTrade = {
 };
 export type BacktestRun = {
   id: number | string; created_at: string; summary_md: string | null;
-  result: Record<string, unknown>;
+  result: Record<string, any>;
 };
 export type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[] };
 
