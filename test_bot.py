@@ -69,3 +69,17 @@ def test_round_trip_cost_is_split_between_sides():
     notional = 10_000
     assert bot.fee_for_notional(notional) == pytest.approx(5.0)
     assert 2 * bot.fee_for_notional(notional) == pytest.approx(10.0)
+
+
+def test_daily_cap_halts_new_entries_when_open_position_has_no_mark():
+    pos = bot.Position(
+        "TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW, entry_fee=0.5
+    )
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5,
+        day_pnl=-0.5,
+        positions={"TEST": pos},
+        last_prices={},
+    )
+    bot.check_daily_cap(state)
+    assert state.halted is True
