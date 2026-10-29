@@ -151,3 +151,56 @@ def test_startup_refuses_when_open_trade_check_fails(monkeypatch):
 def test_startup_allows_clean_paper_trade_table(monkeypatch):
     monkeypatch.setattr(bot, "SB", _FakeSupabase())
     bot.assert_safe_startup()
+
+
+
+def test_entry_is_cancelled_when_supabase_persistence_fails(monkeypatch):
+    state = bot.State(ranges={"TEST": (99.0, 98.0)})
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.0)
+    monkeypatch.setattr(bot, "LLM_MODE", "off")
+    monkeypatch.setattr(bot, "log_entry", lambda _pos: (_ for _ in ()).throw(
+        RuntimeError("Supabase insert failed")
+    ))
+
+    bot.try_entry(state, "TEST", NOW)
+
+    assert state.halted is True
+    assert state.positions == {}
+    assert state.trades_today == 0
+    assert state.cash == pytest.approx(bot.CAPITAL)
+
+
+def test_close_persistence_failure_retains_position_and_ledger(monkeypatch):
+    pos = bot.Position("TEST", "BUY", 10, 100.0, 99.0, 102.0, NOW,
+                       row_id=123, entry_fee=0.5)
+    state = bot.State(
+        cash=bot.CAPITAL - 1000.5, day_pnl=-0.5,
+        positions={"TEST": pos}, last_prices={"TEST": 100.0},
+    )
+    monkeypatch.setattr(bot, "log_trade", lambda *_a, **_k: (_ for _ in ()).throw(
+        RuntimeError("Supabase close failed")
+    ))
+
+    closed = bot.close_position(state, "TEST", 98.0, "stop_loss", NOW)
+
+    assert closed is False
+    assert state.halted is True
+    assert state.positions["TEST"] is pos
+    assert state.cash == pytest.approx(bot.CAPITAL - 1000.5)
+    assert state.day_pnl == pytest.approx(-0.5)
+
+
+def test_mark_persistence_failure_halts_new_entries_but_keeps_position(monkeypatch):
+    pos = bot.Position("TEST", "BUY", 10, 100.0, 90.0, 120.0, NOW,
+                       row_id=123, entry_fee=0.5)
+    state = bot.State(positions={"TEST": pos}, last_prices={"TEST": 100.0})
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.0)
+    monkeypatch.setattr(bot, "log_price", lambda *_a: (_ for _ in ()).throw(
+        RuntimeError("Supabase update failed")
+    ))
+
+    bot.manage_positions(state, NOW)
+
+    assert state.halted is True
+    assert state.positions["TEST"] is pos
+    assert state.last_prices["TEST"] == pytest.approx(101.0)
