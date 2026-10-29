@@ -202,7 +202,9 @@ def run_day(signals, cost_pct=None):
             for open_key, trade in open_.items():
                 mark = marked_prices.get(open_key, trade["entry"])
                 side = trade["side"]
-                gross_unrealized = (mark - trade["entry"]) * trade["qty"] * side
+                # Mark the open position at an estimated adverse exit fill, matching bot.py.
+                mark_exit_fill = mark * (1 - side * SLIPPAGE_PCT / 100.0)
+                gross_unrealized = (mark_exit_fill - trade["entry"]) * trade["qty"] * side
                 exit_notional = max(0.0, trade["value"] + gross_unrealized * side)
                 exit_fee = exit_notional * side_cost_pct / 100.0
                 marked_pnl += gross_unrealized - trade["entry_fee"] - exit_fee
