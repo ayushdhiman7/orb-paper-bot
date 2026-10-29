@@ -35,8 +35,16 @@ The bot can also run as a long-running worker.
 - **Paid but easy:** Render background worker (`render.yaml` included, starter plan), Railway, or Fly.io.
 
 ## Dashboard (installable PWA)
-`docs/` is a static dashboard UI, but it must not be exposed with direct anonymous access to the trading tables. The `paper_trades` and `backtest_runs` tables are private: RLS is enabled and `anon`/`authenticated` have no read policy or table grants. The browser-only dashboard therefore cannot load live database data until a private access design is implemented (for example, authenticated user access with appropriate row-level policies or a server-side API that checks authorization). Do not add public SELECT policies or put a service-role/secret key in the page to make it work. Static hosting alone does not make the data private; protect the dashboard route as well if the trading history itself should not be public.
 
+The dashboard in `docs/` uses Supabase Auth magic-link sign-in and calls the `dashboard-data` Edge Function. The function validates the user's session and checks the email against the server-side `DASHBOARD_ALLOWED_EMAIL` secret before using the server-side service-role key to read private trade and backtest records. The service-role key must never be included in browser code. The dashboard does not cache trading records in local storage and clears in-memory records on sign-out.
+
+To enable private live data:
+1. Deploy `supabase/functions/dashboard-data/index.ts` to the existing Supabase project with JWT verification enabled.
+2. Set the Edge Function secret `DASHBOARD_ALLOWED_EMAIL` to the single email address allowed to view this dashboard.
+3. In Supabase Auth, configure the site URL and allowed redirect URL to include the deployed dashboard URL. Ensure the allowed email can receive magic links.
+4. Keep `paper_trades` and `backtest_runs` private. Do not add public SELECT policies or expose the service-role key.
+
+Until the function is deployed and the allowlist secret is configured, the dashboard fails closed and shows no trading data. Static hosting alone does not make private data safe; access to the page itself may remain public, but data requests are authenticated and authorized server-side.
 ## Backtest
 `backtest.py` replays the same rules on ~60 days of free 5-minute data with costs and slippage, tries 15 stop/target settings, and checks the best one on days it never saw. Run it from the Actions tab: backtest -> Run workflow, then open the run and read the summary. It is a smoke test, not proof of an edge.
 
