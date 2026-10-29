@@ -41,6 +41,7 @@ function App() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [sideFilter, setSideFilter] = useState("All sides");
+  const [activeRange, setActiveRange] = useState("7D");
   const [mobileNav, setMobileNav] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -56,12 +57,18 @@ function App() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const closedTrades = useMemo(() => data.trades.filter(t => t.status !== "open" && t.pnl !== null && !t.exit_estimated), [data.trades]);
+  const closedTrades = useMemo(() => {
+    const closed = data.trades.filter(t => t.status !== "open" && t.pnl !== null && !t.exit_estimated);
+    if (activeRange === "ALL") return closed;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (activeRange === "1D" ? 1 : activeRange === "30D" ? 30 : 7));
+    return closed.filter(t => new Date(t.ts) >= cutoff);
+  }, [data.trades, activeRange]);
   const totalPnl = closedTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
   const winners = closedTrades.filter(t => Number(t.pnl) > 0).length;
   const winRate = closedTrades.length ? winners / closedTrades.length * 100 : 0;
   const openTrades = data.trades.filter(t => t.status === "open");
-  const controlTrades = data.controls.filter(t => t.pnl !== null);
+  const controlTrades = data.controls.filter(t => t.pnl !== null && (activeRange === "ALL" || new Date(t.ts) >= new Date(Date.now() - (activeRange === "1D" ? 1 : activeRange === "30D" ? 30 : 7) * 86400000)));
   const controlPnl = controlTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
   const aiSkipped = data.trades.filter(t => t.llm_decision === "skip").length;
   const filteredTrades = data.trades.filter(t =>
@@ -123,7 +130,7 @@ function MetricCard({ label, value, change, positive, icon: Icon, sub }: { label
 function Overview({ trades, totalPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, setTab }: { trades:PaperTrade[]; totalPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; setTab:(t:Tab)=>void }) {
   const recent = [...trades].sort((a,b) => new Date(b.ts).getTime()-new Date(a.ts).getTime()).slice(0,5);
   return <>
-    <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{["1D","7D","30D","ALL"].map(x=><button key={x} className={x==="7D"?"selected":""}>{x}</button>)}</div></div>
+    <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{["1D","7D","30D","ALL"].map(x=><button key={x} onClick={()=>setActiveRange(x)} className={activeRange===x?"selected":""}>{x}</button>)}</div></div>
     <div className="metric-grid">
       <MetricCard label="Net realized P&L" value={money(totalPnl)} change={totalPnl >= 0 ? "Positive" : "Negative"} positive={totalPnl >= 0} icon={Wallet} sub="After recorded trading costs"/>
       <MetricCard label="Win rate" value={`${winRate.toFixed(1)}%`} icon={TrendingUp} sub={`${trades.filter(t=>Number(t.pnl)>0).length} winning trades`}/>
@@ -145,7 +152,7 @@ function TradeTable({ trades }: { trades:PaperTrade[] }) {
 }
 
 function Journal({ trades, query, setQuery, sideFilter, setSideFilter }: { trades:PaperTrade[]; query:string; setQuery:(v:string)=>void; sideFilter:string; setSideFilter:(v:string)=>void }) {
-  return <section className="panel journal-panel"><div className="journal-toolbar"><div className="search-box"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search symbol, reason or AI decision"/></div><select value={sideFilter} onChange={e=>setSideFilter(e.target.value)} aria-label="Filter side"><option>All sides</option><option>BUY</option><option>SELL</option></select><button className="button-secondary"><SlidersHorizontal size={15}/> Filters</button></div><div className="panel-heading journal-heading"><div><h3>Trade journal</h3><p>{trades.length} trades match the current filters</p></div><span className="select-chip"><CalendarDays size={14}/> All available dates</span></div><TradeTable trades={trades}/></section>;
+  return <section className="panel journal-panel"><div className="journal-toolbar"><div className="search-box"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search symbol, reason or AI decision"/></div><select value={sideFilter} onChange={e=>setSideFilter(e.target.value)} aria-label="Filter side"><option>All sides</option><option>BUY</option><option>SELL</option></select><button className="button-secondary" onClick={()=>{setQuery("");setSideFilter("All sides");}}><X size={15}/> Reset</button></div><div className="panel-heading journal-heading"><div><h3>Trade journal</h3><p>{trades.length} trades match the current filters</p></div><span className="select-chip"><CalendarDays size={14}/> All available dates</span></div><TradeTable trades={trades}/></section>;
 }
 
 function AIComparison({ trades, controls, aiPnl, controlPnl, aiSkipped }: { trades:PaperTrade[]; controls:ControlTrade[]; aiPnl:number; controlPnl:number; aiSkipped:number }) {
