@@ -131,29 +131,41 @@ def find_signal(symbol, bars, stop_pct, rr, opts=None, prev_close=None):
         stop = entry * (1 - side * stop_pct / 100)
         target = entry + side * abs(entry - stop) * rr
         exit_price, reason, exit_ts = None, "square_off", ts
+        mark_path = []
         for j in range(i + 1, len(after)):
             r2, ts2 = after.iloc[j], after.index[j]
             exit_ts = ts2
+            mark_price = float(r2["Close"])
             if side == 1:
                 if r2["Low"] <= stop:
                     exit_price, reason = stop, "stop"
+                    mark_price = stop
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
                 if r2["High"] >= target:
                     exit_price, reason = target, "target"
+                    mark_price = target
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
             else:
                 if r2["High"] >= stop:
                     exit_price, reason = stop, "stop"
+                    mark_price = stop
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
                 if r2["Low"] <= target:
                     exit_price, reason = target, "target"
+                    mark_price = target
+                    mark_path.append((ts2 + BAR, mark_price))
                     break
+            mark_path.append((ts2 + BAR, mark_price))
         if exit_price is None:
             exit_price = float(after.iloc[-1]["Close"]) if len(after) > i + 1 else close
             exit_ts = after.index[-1] if len(after) > i + 1 else ts
         exit_fill = exit_price * (1 - side * slip)
         return {"symbol": symbol, "side": side, "entry": entry, "stop": stop, "exit_fill": exit_fill,
-                "reason": reason, "entry_time": ts + BAR, "exit_time": exit_ts + BAR}
+                "reason": reason, "entry_time": ts + BAR, "exit_time": exit_ts + BAR,
+                "mark_path": mark_path}
     return None
 
 
