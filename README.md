@@ -35,9 +35,7 @@ The bot can also run as a long-running worker.
 - **Paid but easy:** Render background worker (`render.yaml` included, starter plan), Railway, or Fly.io.
 
 ## Dashboard (installable PWA)
-`docs/` is a static page with four tabs: Overview (open trades with live delayed prices and open P&L), History (daily P&L bars), Stocks (per-stock stats with filters) and Backtest (latest run from Supabase).
-- GitHub Pages: Settings -> Pages -> Deploy from a branch -> main -> /docs.
-- Vercel: vercel.com -> Add New Project -> import this repo -> set Root Directory to `docs`, Framework "Other", no build command -> Deploy.
+`docs/` is a static dashboard UI, but it must not be exposed with direct anonymous access to the trading tables. The `paper_trades` and `backtest_runs` tables are private: RLS is enabled and `anon`/`authenticated` have no read policy or table grants. The browser-only dashboard therefore cannot load live database data until a private access design is implemented (for example, authenticated user access with appropriate row-level policies or a server-side API that checks authorization). Do not add public SELECT policies or put a service-role/secret key in the page to make it work. Static hosting alone does not make the data private; protect the dashboard route as well if the trading history itself should not be public.
 
 ## Backtest
 `backtest.py` replays the same rules on ~60 days of free 5-minute data with costs and slippage, tries 15 stop/target settings, and checks the best one on days it never saw. Run it from the Actions tab: backtest -> Run workflow, then open the run and read the summary. It is a smoke test, not proof of an edge.
