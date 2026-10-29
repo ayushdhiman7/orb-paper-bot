@@ -96,9 +96,9 @@ SB = get_supabase()
 
 
 def log_entry(pos):
-    """Save a trade as 'open' the moment it is entered, so the dashboard can show it."""
-    if not SB:
-        return None
+    """Persist an open paper trade before changing in-memory position state."""
+    if SB is None:
+        raise RuntimeError("Supabase persistence is required to record paper entries.")
     try:
         res = SB.table("paper_trades").insert({
             "ts": pos.opened_at.isoformat(), "symbol": pos.symbol, "side": pos.side,
@@ -107,10 +107,12 @@ def log_entry(pos):
             **({"llm_decision": pos.llm_decision, "llm_reason": pos.llm_reason} if pos.llm_decision else {}),
             "status": "open", "mode": "paper",
         }).execute()
-        return res.data[0]["id"]
-    except Exception as e:  # never let logging crash the bot
-        print(f"[warn] Supabase open-trade insert failed: {e}")
-        return None
+        rows = getattr(res, "data", None) or []
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase did not return the inserted paper trade ID.")
+        return rows[0]["id"]
+    except Exception as e:
+        raise RuntimeError("Supabase open-trade insert failed; entry cancelled.") from e
 
 
 def log_price(pos, price: float, now):
