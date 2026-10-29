@@ -31,3 +31,6 @@ create table if not exists backtest_runs (
 );
 alter table backtest_runs enable row level security;
 create policy "public read backtest_runs" on backtest_runs for select to anon using (true);
+
+-- The static dashboard reads these tables with the publishable/anon key.
+grant select on table paper_trades, backtest_runs to anon;
