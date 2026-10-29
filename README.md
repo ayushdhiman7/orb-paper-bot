@@ -6,19 +6,21 @@ Opening-range-breakout bot that trades **fake money only**. No broker connection
 - Pulls free 1-minute NSE data from Yahoo Finance (`yfinance`, delayed ~15 min).
 - Marks the 9:15-9:30 IST high/low per stock, enters on a breakout, exits on stop-loss, target, or the 3:15 PM square-off.
 - Risk rules: 1% risk per trade, 3% daily loss cap, max 3 trades/day, ~Rs 20/order cost model.
-- Logs every closed trade to Supabase (or `trades.csv` if no keys are set).
+- Requires Supabase to persist paper trades and verify there are no unresolved open trades before startup. The bot fails closed when trade persistence fails; it does not treat CSV fallback as safe position state.
 
 ## Run locally
-```
+Install dependencies and configure Supabase first. Run `schema.sql` in the Supabase SQL editor, then set `SUPABASE_URL` and `SUPABASE_KEY` in your environment. Never commit credentials.
+
+```bash
 pip install -r requirements.txt
 python bot.py
 ```
-Run it on a weekday during market hours (9:15-15:30 IST). It sleeps otherwise.
+Run it on a weekday during market hours (9:15-15:30 IST). It sleeps otherwise. Startup refuses to proceed if Supabase is unavailable, if the open-trade check fails, or if unresolved open paper trades remain from an earlier process. The current version does not automatically restore in-memory positions; reconcile those records before restarting. Entry/close persistence failures halt new entries and retain unresolved positions rather than silently falling back to CSV.
 
-## Supabase (free)
+## Supabase (required for safe paper-bot operation)
 1. Create a project at supabase.com.
 2. SQL Editor: run `schema.sql`.
-3. Settings -> API: copy the project URL and the `service_role` key into env vars `SUPABASE_URL` and `SUPABASE_KEY`. Never commit the key.
+3. Settings -> API: configure the project URL and a server-side key in `SUPABASE_URL` and `SUPABASE_KEY`. Never commit the key or expose a service-role key in browser code. The bot requires Supabase to verify startup state and durably log entries and closes.
 
 ## Deploy (free, GitHub Actions)
 `.github/workflows/paper-trade.yml` starts the bot every weekday at about 9:35 AM IST and stops it after the 3:15 PM square-off.
