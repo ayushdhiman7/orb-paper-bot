@@ -171,7 +171,7 @@ def run_day(signals, cost_pct=None):
         if taken >= MAX_TRADES or realized <= -CAPITAL * DAILY_CAP_PCT / 100:
             break
         per_share = abs(s["entry"] - s["stop"])
-        qty = min(int((CAPITAL * RISK_PCT / 100) // per_share), int(max(cash, 0) // s["entry"]))
+        qty = min(int((CAPITAL * RISK_PCT / 100) // per_share), int(max(cash, 0) // (s["entry"] * (1 + side_cost_pct / 100))))
         if qty < 1:
             continue
         value = qty * s["entry"]
