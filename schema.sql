@@ -52,6 +52,7 @@ alter table shadow_trades add column if not exists signal_id text;
 alter table shadow_trades add column if not exists side text;
 alter table shadow_trades add column if not exists qty integer;
 alter table shadow_trades add column if not exists entry_price numeric;
+alter table shadow_trades add column if not exists entry_fee numeric;
 alter table shadow_trades add column if not exists entry_ts timestamptz;
 alter table shadow_trades add column if not exists ai_decision text;
 alter table shadow_trades add column if not exists ai_reason text;
