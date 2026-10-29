@@ -25,9 +25,9 @@ warnings.filterwarnings("ignore")
 IST = ZoneInfo("Asia/Kolkata")
 
 SYMBOLS = os.getenv("SYMBOLS", "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS").split(",")
-CAPITAL = float(os.getenv("CAPITAL", "4000"))
+CAPITAL = float(os.getenv("CAPITAL", "14000"))
 RISK_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))
-COST_PCT = float(os.getenv("COST_PCT", "0.10"))          # all-in round-trip cost, % of position value
+COST_PCT = float(os.getenv("COST_PCT", "0.10"))          # total entry + exit transaction costs, % notional
 SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))  # per side, % of price
 MAX_TRADES = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
 DAILY_CAP_PCT = float(os.getenv("DAILY_LOSS_CAP_PCT", "3.0"))
@@ -162,25 +162,29 @@ def run_day(signals, cost_pct=None):
     cost_pct = COST_PCT if cost_pct is None else cost_pct
     signals = sorted(signals, key=lambda s: s["entry_time"])
     cash, open_, trades, realized, taken = CAPITAL, [], [], 0.0, 0
+    side_cost_pct = cost_pct / 2.0
     for s in signals:
         for o in [o for o in open_ if o["exit_time"] <= s["entry_time"]]:
-            cash += o["value"] + o["gross"]
+            cash += o["value"] + o["gross"] - o["exit_fee"]
             realized += o["net"]
             open_.remove(o)
         if taken >= MAX_TRADES or realized <= -CAPITAL * DAILY_CAP_PCT / 100:
             break
         per_share = abs(s["entry"] - s["stop"])
-        qty = min(int((CAPITAL * RISK_PCT / 100) // per_share), int(max(cash, 0) // s["entry"]))
+        qty = min(int((CAPITAL * RISK_PCT / 100) // per_share), int(max(cash, 0) // (s["entry"] * (1 + side_cost_pct / 100))))
         if qty < 1:
             continue
         value = qty * s["entry"]
         gross = (s["exit_fill"] - s["entry"]) * qty * s["side"]
-        net = gross - cost_pct / 100 * value
-        cash -= value
+        entry_fee = value * side_cost_pct / 100
+        exit_fee = max(0.0, (value + gross * s["side"])) * side_cost_pct / 100
+        net = gross - entry_fee - exit_fee
+        cash -= value + entry_fee
         if cash < -1e-6:
             raise RuntimeError("cash went negative: sizing bug")
         taken += 1
         t = {"symbol": s["symbol"], "net": net, "gross": gross, "value": value,
+             "entry_fee": entry_fee, "exit_fee": exit_fee,
              "exit_time": s["exit_time"], "reason": s["reason"], "side": s["side"]}
         open_.append(t)
         trades.append(t)

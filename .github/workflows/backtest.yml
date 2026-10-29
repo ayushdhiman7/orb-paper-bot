@@ -15,6 +15,8 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -u backtest.py
         env:
-          CAPITAL: "4000"
+          CAPITAL: "14000"
+          COST_PCT: "0.10"
+          SLIPPAGE_PCT: "0.05"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
