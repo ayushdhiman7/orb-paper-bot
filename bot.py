@@ -18,7 +18,7 @@ import yfinance as yf
 
 import llm_gate
 import notify
-from shadow import ShadowLedger
+from shadow import NoAIControlLedger, ShadowLedger
 from angel_feed import AngelFeed
 
 warnings.filterwarnings("ignore")  # yfinance/pandas deprecation noise buries the real log lines
@@ -85,6 +85,7 @@ class State:
     done_symbols: set = field(default_factory=set)
     halted: bool = False
     last_prices: dict = field(default_factory=dict)
+    control_trades_today: int = 0  # independent no-AI control's daily entry limit
 
 
 # ---------------- Logging ----------------
@@ -161,6 +162,7 @@ def adverse_fill(price: float, direction: int, is_entry: bool) -> float:
 
 
 LEDGER = ShadowLedger(fee_for_notional, adverse_fill)
+CONTROL_LEDGER = NoAIControlLedger(fee_for_notional, adverse_fill)
 
 
 def log_shadow(rows):
@@ -333,14 +335,23 @@ def try_entry(state: State, symbol: str, now: datetime):
     review = ask_ai(symbol, side, price, stop, target, rng, now) if LLM_MODE in ("shadow", "gate") else None
     if review:
         print(f"[AI] {symbol} {side}: {review['decision']} - {review['reason']}")
-        if LLM_MODE == "gate" and review["decision"] == "skip":
-            print(f"[skip] {symbol}: AI advised skipping")
-            state.done_symbols.add(symbol)
-            return
+    decision = review["decision"] if review else ("not_requested" if LLM_MODE == "off" else "unavailable")
+    ai_reason = review.get("reason", "") if review else ""
     entry_fee = fee_for_notional(qty * entry_price)
     pos = Position(symbol, side, qty, entry_price, stop, target, now, entry_fee=entry_fee)
     if review:
         pos.llm_decision, pos.llm_reason = review["decision"], review["reason"]
+
+    # The no-AI control records eligible signals independently of whether AI accepts them.
+    # It follows its own max-trades/day limit and is never used to change real paper orders.
+    signal_id = f"{symbol}:{now.isoformat()}"
+    if state.control_trades_today < MAX_TRADES_PER_DAY:
+        CONTROL_LEDGER.open(symbol, pos, signal_id, decision, ai_reason)
+        state.control_trades_today += 1
+    if LLM_MODE == "gate" and review and review["decision"] == "skip":
+        print(f"[skip] {symbol}: AI advised skipping; no-AI control continues hypothetically")
+        state.done_symbols.add(symbol)
+        return
     try:
         pos.row_id = log_entry(pos)
     except RuntimeError as exc:
@@ -350,6 +361,7 @@ def try_entry(state: State, symbol: str, now: datetime):
         return
     state.positions[symbol] = pos
     LEDGER.open(symbol, pos)
+    CONTROL_LEDGER.link_trade(symbol, pos.row_id)
     state.cash -= qty * entry_price + entry_fee
     state.trades_today += 1
     state.day_pnl -= entry_fee
@@ -384,6 +396,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     state.done_symbols.add(symbol)
     print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
     log_shadow(LEDGER.close(symbol, price, round(trade_net_pnl, 2), now))
+    # Do not close the no-AI control here: it must survive AI exits and other early real exits.
     notify.send(f"EXIT {symbol} @ {exit_fill:.2f} ({reason}) net P&L {trade_net_pnl:+.2f}")
     return True
 
@@ -424,6 +437,27 @@ def manage_positions(state: State, now: datetime):
                     LEDGER.ai_exit(symbol, price, now, view.get("reason"))
                 if view["decision"] == "exit" and AI_EXITS == "act":
                     close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
+
+
+def manage_control_positions(state: State, now: datetime):
+    """Advance independent no-AI controls even when the real trade was skipped or already closed."""
+    for symbol in list(CONTROL_LEDGER.tracks):
+        price = state.last_prices.get(symbol) if symbol in state.positions else last_price(symbol)
+        if price is None:
+            continue
+        log_shadow(CONTROL_LEDGER.tick(symbol, price, now))
+
+
+def close_control_positions(state: State, now: datetime):
+    """Square off hypothetical controls independently from the actual paper positions."""
+    prices = {}
+    for symbol in list(CONTROL_LEDGER.tracks):
+        price = last_price(symbol)
+        if price is None and now.time() >= SQUARE_OFF_FALLBACK:
+            price = state.last_prices.get(symbol)
+        if price is not None:
+            prices[symbol] = price
+    log_shadow(CONTROL_LEDGER.close_all(prices, now, "square_off"))
 
 
 def marked_day_pnl(state: State) -> float:
@@ -586,6 +620,7 @@ def run():
                     print(f"[warn] {sym}: no fresh quote at {now:%H:%M}, using last mark {p:.2f}")
                 if p is not None:
                     close_position(state, sym, p, "square_off", now, note=note)
+            close_control_positions(state, now)
             if ONE_DAY and not state.positions:
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
                 return
@@ -598,6 +633,7 @@ def run():
                         state.ranges[sym] = r
                         print(f"[RANGE] {sym}: high {r[0]:.2f} low {r[1]:.2f}")
             manage_positions(state, now)
+            manage_control_positions(state, now)
             check_daily_cap(state)
             if t < NO_NEW_TRADES_AFTER:
                 for sym in SYMBOLS:
