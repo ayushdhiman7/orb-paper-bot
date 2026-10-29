@@ -24,13 +24,14 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # ---------------- Config (override with environment variables) ----------------
 SYMBOLS = os.getenv("SYMBOLS", "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS").split(",")
-CAPITAL = float(os.getenv("CAPITAL", "4000"))          # INR, paper money
+CAPITAL = float(os.getenv("CAPITAL", "14000"))          # INR, paper money
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "1.0"))
 TARGET_RR = float(os.getenv("TARGET_RR", "1.5"))       # take profit = 1.5x risk
 DAILY_LOSS_CAP_PCT = float(os.getenv("DAILY_LOSS_CAP_PCT", "3.0"))
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
-COST_PER_ORDER = float(os.getenv("COST_PER_ORDER", "20"))  # rough brokerage+charges, INR
+COST_PCT = float(os.getenv("COST_PCT", "0.10"))          # total entry + exit transaction costs, % of notional
+SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))  # adverse fill slippage per side, % of price
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 ONE_DAY = os.getenv("ONE_DAY", "0") == "1"   # exit after today's session (used by GitHub Actions)
 # AI second opinion (Gemini). "off" = never ask, "shadow" = ask and record the answer but trade anyway (default),
@@ -67,6 +68,7 @@ class Position:
     llm_reason: str = None
     peak: float = None        # best price seen since entry (for BUY the highest, for SELL the lowest)
     last_ai_check: datetime = None
+    entry_fee: float = 0.0
 
 
 @dataclass
@@ -78,6 +80,7 @@ class State:
     positions: dict = field(default_factory=dict)
     done_symbols: set = field(default_factory=set)
     halted: bool = False
+    last_prices: dict = field(default_factory=dict)
 
 
 # ---------------- Logging ----------------
@@ -138,6 +141,17 @@ def log_trade(row: dict, row_id=None):
         if new:
             w.writeheader()
         w.writerow(row)
+
+
+def fee_for_notional(notional: float) -> float:
+    """Half of COST_PCT is charged per side; COST_PCT is the complete round trip."""
+    return max(0.0, notional) * (COST_PCT / 2.0) / 100.0
+
+
+def adverse_fill(price: float, direction: int, is_entry: bool) -> float:
+    """Apply adverse slippage: pay more on buys and receive less on sells."""
+    sign = direction if is_entry else -direction
+    return price * (1.0 + sign * SLIPPAGE_PCT / 100.0)
 
 
 # ---------------- Data ----------------
@@ -229,7 +243,7 @@ def ask_ai_exit(pos, price, now):
                "unrealised_pnl_in_risk_units": round((price - pos.entry) * direction / risk, 2),
                "best_price_since_entry": round(peak, 2),
                "best_profit_in_risk_units": round((peak - pos.entry) * direction / risk, 2),
-               "exit_brokerage_rupees": COST_PER_ORDER}
+               "exit_transaction_cost_rupees": round(fee_for_notional(pos.qty * price), 2)}
         df = fetch_candles(pos.symbol)
         if not df.empty:
             ctx["last_12_five_min_closes"] = [round(float(x), 2) for x in df["Close"].resample("5min").last().dropna().tail(12)]
@@ -256,13 +270,16 @@ def try_entry(state: State, symbol: str, now: datetime):
         side, stop = "SELL", price * (1 + STOP_LOSS_PCT / 100)
     if not side:
         return
-    qty = size_position(price, stop, state.cash)
+    direction = 1 if side == "BUY" else -1
+    entry_price = adverse_fill(price, direction, is_entry=True)
+    stop = entry_price * (1 - direction * STOP_LOSS_PCT / 100)
+    qty = size_position(entry_price, stop, state.cash)
     if qty < 1:
         print(f"[skip] {symbol}: price {price:.2f} too high for capital/risk")
         state.done_symbols.add(symbol)
         return
-    risk = abs(price - stop)
-    target = price + risk * TARGET_RR if side == "BUY" else price - risk * TARGET_RR
+    risk = abs(entry_price - stop)
+    target = entry_price + direction * risk * TARGET_RR
     review = ask_ai(symbol, side, price, stop, target, rng, now) if LLM_MODE in ("shadow", "gate") else None
     if review:
         print(f"[AI] {symbol} {side}: {review['decision']} - {review['reason']}")
@@ -270,29 +287,34 @@ def try_entry(state: State, symbol: str, now: datetime):
             print(f"[skip] {symbol}: AI advised skipping")
             state.done_symbols.add(symbol)
             return
-    pos = Position(symbol, side, qty, price, stop, target, now)
+    entry_fee = fee_for_notional(qty * entry_price)
+    pos = Position(symbol, side, qty, entry_price, stop, target, now, entry_fee=entry_fee)
     if review:
         pos.llm_decision, pos.llm_reason = review["decision"], review["reason"]
     pos.row_id = log_entry(pos)
     state.positions[symbol] = pos
-    state.cash -= qty * price
+    state.cash -= qty * entry_price + entry_fee
     state.trades_today += 1
-    state.day_pnl -= COST_PER_ORDER
-    print(f"[ENTRY] {side} {qty} {symbol} @ {price:.2f} SL {stop:.2f} TP {target:.2f}")
+    state.day_pnl -= entry_fee
+    state.last_prices[symbol] = price
+    print(f"[ENTRY] {side} {qty} {symbol} @ {entry_price:.2f} SL {stop:.2f} TP {target:.2f} (fee {entry_fee:.2f})")
 
 
 def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
     pos = state.positions.pop(symbol)
     direction = 1 if pos.side == "BUY" else -1
-    pnl = (price - pos.entry) * pos.qty * direction - COST_PER_ORDER
-    state.day_pnl += pnl
-    state.cash += pos.qty * pos.entry + (price - pos.entry) * pos.qty * direction  # free the cash
+    exit_fill = adverse_fill(price, direction, is_entry=False)
+    gross = (exit_fill - pos.entry) * pos.qty * direction
+    exit_fee = fee_for_notional(pos.qty * exit_fill)
+    trade_net_pnl = gross - pos.entry_fee - exit_fee
+    state.day_pnl += gross - exit_fee  # entry fee was booked when the position opened
+    state.cash += pos.qty * pos.entry + gross - exit_fee  # release reserved notional and settle P&L/exit fee
     state.done_symbols.add(symbol)
-    print(f"[EXIT] {symbol} @ {price:.2f} ({reason}) net PnL {pnl:+.2f}")
+    print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
     log_trade({
         "ts": now.isoformat(), "symbol": symbol, "side": pos.side, "qty": pos.qty,
-        "entry": round(pos.entry, 2), "exit": round(price, 2),
-        "pnl": round(pnl, 2), "reason": reason, "mode": "paper",
+        "entry": round(pos.entry, 2), "exit": round(exit_fill, 2),
+        "pnl": round(trade_net_pnl, 2), "reason": reason, "mode": "paper",
         **({"llm_reason": ((pos.llm_reason + " | ") if pos.llm_reason else "") + "EXIT: " + note} if note else {}),
     }, row_id=pos.row_id)
 
@@ -303,6 +325,7 @@ def manage_positions(state: State, now: datetime):
         price = last_price(symbol)
         if price is None:
             continue
+        state.last_prices[symbol] = price
         log_price(pos, price, now)
         better = (lambda a, b: a > b) if pos.side == "BUY" else (lambda a, b: a < b)
         if pos.peak is None or better(price, pos.peak):
@@ -323,10 +346,28 @@ def manage_positions(state: State, now: datetime):
                     close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
 
 
+def marked_day_pnl(state: State) -> float:
+    """Realized daily P&L plus marked open P&L, net of estimated exit fee.
+
+    Entry fees are already included in state.day_pnl when positions open.
+    """
+    total = state.day_pnl
+    for symbol, pos in state.positions.items():
+        price = state.last_prices.get(symbol)
+        if price is None:
+            continue
+        direction = 1 if pos.side == "BUY" else -1
+        estimated_exit = adverse_fill(price, direction, is_entry=False)
+        total += (estimated_exit - pos.entry) * pos.qty * direction
+        total -= fee_for_notional(pos.qty * estimated_exit)
+    return total
+
+
 def check_daily_cap(state: State):
-    if state.day_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
+    marked_pnl = marked_day_pnl(state)
+    if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
         state.halted = True
-        print(f"[HALT] Daily loss cap hit ({state.day_pnl:.2f}). No new trades today.")
+        print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
 
 
 # ---------------- Main loop ----------------
