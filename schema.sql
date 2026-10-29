@@ -40,3 +40,13 @@ grant select on table paper_trades, backtest_runs to anon;
 -- Estimated/reconstructed exits are kept for audit but excluded from confirmed performance metrics.
 alter table paper_trades add column if not exists exit_estimated boolean not null default false;
 alter table paper_trades add column if not exists exit_source text;
+
+-- Shadow ledger: hypothetical outcomes of alternative exit rules, per real paper trade. Research only.
+create table if not exists shadow_trades (
+  id bigint generated always as identity primary key,
+  trade_id bigint, symbol text, variant text, exit_price numeric, exit_reason text,
+  pnl numeric, baseline_pnl numeric, ts timestamptz
+);
+alter table shadow_trades enable row level security;
+create policy "public read shadow_trades" on shadow_trades for select to anon using (true);
+grant select on table shadow_trades to anon;

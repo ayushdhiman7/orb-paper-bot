@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 import llm_gate
+from shadow import ShadowLedger
 from angel_feed import AngelFeed
 
 warnings.filterwarnings("ignore")  # yfinance/pandas deprecation noise buries the real log lines
@@ -156,6 +157,19 @@ def adverse_fill(price: float, direction: int, is_entry: bool) -> float:
     """Apply adverse slippage: pay more on buys and receive less on sells."""
     sign = direction if is_entry else -direction
     return price * (1.0 + sign * SLIPPAGE_PCT / 100.0)
+
+
+LEDGER = ShadowLedger(fee_for_notional, adverse_fill)
+
+
+def log_shadow(rows):
+    """Best-effort: shadow results are research data and must never affect the real paper trades."""
+    if not rows or SB is None:
+        return
+    try:
+        SB.table("shadow_trades").insert(rows).execute()
+    except Exception as e:
+        print(f"[warn] shadow ledger write failed ({type(e).__name__}); baseline unaffected")
 
 
 # ---------------- Data ----------------
@@ -333,6 +347,7 @@ def try_entry(state: State, symbol: str, now: datetime):
         print(f"[HALT] {exc} No new entries until persistence is repaired.")
         return
     state.positions[symbol] = pos
+    LEDGER.open(symbol, pos)
     state.cash -= qty * entry_price + entry_fee
     state.trades_today += 1
     state.day_pnl -= entry_fee
@@ -364,6 +379,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     state.cash += pos.qty * pos.entry + gross - exit_fee  # release reserved notional and settle P&L/exit fee
     state.done_symbols.add(symbol)
     print(f"[EXIT] {symbol} @ {exit_fill:.2f} ({reason}) net PnL {trade_net_pnl:+.2f}")
+    log_shadow(LEDGER.close(symbol, price, round(trade_net_pnl, 2), now))
     return True
 
 
@@ -385,6 +401,7 @@ def manage_positions(state: State, now: datetime):
         better = (lambda a, b: a > b) if pos.side == "BUY" else (lambda a, b: a < b)
         if pos.peak is None or better(price, pos.peak):
             pos.peak = price
+        LEDGER.tick(symbol, price, now)
         hit_stop = price <= pos.stop if pos.side == "BUY" else price >= pos.stop
         hit_target = price >= pos.target if pos.side == "BUY" else price <= pos.target
         if hit_stop:
@@ -397,6 +414,8 @@ def manage_positions(state: State, now: datetime):
             view = ask_ai_exit(pos, price, now)
             if view:
                 print(f"[AI-EXIT?] {symbol}: {view['decision']} - {view['reason']}")
+                if view["decision"] == "exit":
+                    LEDGER.ai_exit(symbol, price, now)
                 if view["decision"] == "exit" and AI_EXITS == "act":
                     close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
 
@@ -503,6 +522,8 @@ def restore_state(now):
     res = (SB.table("paper_trades").select("*").eq("mode", "paper").gte("ts", day0)
            .order("id").limit(200).execute())
     st = state_from_rows(res.data or [], now)
+    for sym, p in st.positions.items():
+        LEDGER.open(sym, p)
     if st.trades_today:
         print(f"[restore] {st.trades_today} trade(s) today, open: {sorted(st.positions) or 'none'}, "
               f"day P&L {st.day_pnl:+.2f}, cash {st.cash:.2f}")
