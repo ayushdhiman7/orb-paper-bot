@@ -364,6 +364,14 @@ def marked_day_pnl(state: State) -> float:
 
 
 def check_daily_cap(state: State):
+    # Fail closed when an open position cannot be marked. Ignoring a missing quote
+    # could make the daily loss cap appear safer than it really is.
+    unmarked = [symbol for symbol in state.positions if state.last_prices.get(symbol) is None]
+    if unmarked and not state.halted:
+        state.halted = True
+        print(f"[HALT] Missing mark price for open position(s): {', '.join(unmarked)}. No new trades today.")
+        return
+
     marked_pnl = marked_day_pnl(state)
     if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
         state.halted = True
