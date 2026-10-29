@@ -44,16 +44,26 @@ export type ControlTrade = {
   entry_ts?: string | null;
 };
 
+export type BacktestRun = {
+  id: number;
+  created_at: string;
+  summary_md: string | null;
+  result: Record<string, any>;
+};
+
 export async function loadDashboardData() {
   if (!supabase) throw new Error("Supabase is not configured.");
-  const [trades, controls] = await Promise.all([
+  const [trades, controls, backtests] = await Promise.all([
     supabase.from("paper_trades").select("*").order("ts", { ascending: false }).limit(500),
     supabase.from("shadow_trades").select("*").eq("variant", "no_ai_control").order("ts", { ascending: false }).limit(1000),
+    supabase.from("backtest_runs").select("id,created_at,summary_md,result").order("created_at", { ascending: false }).limit(50),
   ]);
   if (trades.error) throw new Error(trades.error.message);
   if (controls.error) throw new Error(controls.error.message);
+  if (backtests.error) throw new Error(`Backtest data unavailable: ${backtests.error.message}`);
   return {
     trades: (trades.data ?? []) as PaperTrade[],
     controls: (controls.data ?? []) as ControlTrade[],
+    backtests: (backtests.data ?? []) as BacktestRun[],
   };
 }
