@@ -76,10 +76,11 @@ class ShadowLedger:
                 elif name == "trail_1R" and (price - (t.peak - d * risk)) * d <= 0:
                     self._set(t, name, price, "trail", now)
 
-    def ai_exit(self, symbol, price, now):
+    def ai_exit(self, symbol, price, now, note=None):
+        """First AI "exit" advice for this trade; the AI's reason is kept so it can be reviewed later."""
         t = self.tracks.get(symbol)
         if t is not None:
-            self._set(t, "ai_exit", price, "ai_exit", now)
+            self._set(t, "ai_exit", price, ("ai_exit: " + str(note)[:200]) if note else "ai_exit", now)
 
     def close(self, symbol, baseline_price, baseline_pnl, now):
         """Baseline trade ended: finish every variant and return one row per variant (for logging)."""

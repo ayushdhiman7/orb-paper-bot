@@ -421,7 +421,7 @@ def manage_positions(state: State, now: datetime):
             if view:
                 print(f"[AI-EXIT?] {symbol}: {view['decision']} - {view['reason']}")
                 if view["decision"] == "exit":
-                    LEDGER.ai_exit(symbol, price, now)
+                    LEDGER.ai_exit(symbol, price, now, view.get("reason"))
                 if view["decision"] == "exit" and AI_EXITS == "act":
                     close_position(state, symbol, price, "ai_exit", now, note=view["reason"])
 

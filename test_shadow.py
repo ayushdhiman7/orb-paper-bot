@@ -65,3 +65,10 @@ def test_shadow_write_failure_never_affects_baseline_close(monkeypatch):
     bot.LEDGER.open("T", pos)
     assert bot.close_position(st, "T", 101.0, "test", NOW) is True
     assert "T" not in st.positions and "T" not in bot.LEDGER.tracks
+
+
+def test_ai_exit_reason_is_kept_for_review():
+    L = mk()
+    L.ai_exit("T", 100.2, NOW, "momentum fading on falling volume")
+    r = {x["variant"]: x for x in L.close("T", 101.0, 8.0, NOW)}
+    assert r["ai_exit"]["exit_reason"] == "ai_exit: momentum fading on falling volume"
