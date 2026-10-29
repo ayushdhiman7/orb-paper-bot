@@ -204,3 +204,8 @@ def test_mark_persistence_failure_halts_new_entries_but_keeps_position(monkeypat
     assert state.halted is True
     assert state.positions["TEST"] is pos
     assert state.last_prices["TEST"] == pytest.approx(101.0)
+
+
+def test_square_off_retry_and_fallback_constants():
+    import bot
+    assert bot.SQUARE_OFF < bot.SQUARE_OFF_FALLBACK < bot.MARKET_CLOSE

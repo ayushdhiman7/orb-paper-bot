@@ -52,6 +52,7 @@ RANGE_END = dtime(9, 30)      # opening range = 9:15 to 9:30
 NO_NEW_TRADES_AFTER = dtime(14, 30)
 SQUARE_OFF = dtime(15, 15)
 MARKET_CLOSE = dtime(15, 30)
+SQUARE_OFF_FALLBACK = dtime(15, 25)   # after this, close at the last known mark if no fresh quote
 
 
 @dataclass
@@ -471,13 +472,16 @@ def run():
         if t >= SQUARE_OFF:
             for sym in list(state.positions):
                 p = last_price(sym)
+                note = None
+                if p is None and t >= SQUARE_OFF_FALLBACK and sym in state.last_prices:
+                    p, note = state.last_prices[sym], "no fresh quote; closed at last known mark"
+                    print(f"[warn] {sym}: no fresh quote at {now:%H:%M}, using last mark {p:.2f}")
                 if p is not None:
-                    close_position(state, sym, p, "square_off", now)
-            if ONE_DAY:
-                if state.positions:
-                    raise RuntimeError(f"ONE_DAY square-off failed; open position(s) remain: {', '.join(sorted(state.positions))}")
+                    close_position(state, sym, p, "square_off", now, note=note)
+            if ONE_DAY and not state.positions:
                 print(f"Day summary: trades {state.trades_today}, net PnL {state.day_pnl:+.2f}")
                 return
+            # positions still open: retry next loop (ONE_DAY ends via the MARKET_CLOSE check above and then fails loudly)
         elif t >= RANGE_END:
             if not state.ranges:
                 for sym in SYMBOLS:

@@ -27,7 +27,7 @@ if ! git diff --quiet "$OLD" "$NEW" -- requirements.txt; then
   "$PY" -m pip install -q -r requirements.txt || { git reset -q --hard "$OLD"; echo "[deploy] pip failed, rolled back"; exit 1; }
 fi
 
-if ! "$PY" -m py_compile bot.py llm_gate.py backtest.py; then
+if ! "$PY" -m py_compile *.py; then
   git reset -q --hard "$OLD"; echo "[deploy] code did not compile, rolled back to ${OLD:0:7}"; exit 1
 fi
 

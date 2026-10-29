@@ -9,4 +9,4 @@ services:
       - key: SUPABASE_KEY
         sync: false
       - key: CAPITAL
-        value: "4000"
+        value: "14000"

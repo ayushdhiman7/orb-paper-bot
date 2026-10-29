@@ -5,7 +5,7 @@ Opening-range-breakout bot that trades **fake money only**. No broker connection
 ## What it does
 - Pulls free 1-minute NSE data from Yahoo Finance (`yfinance`, delayed ~15 min).
 - Marks the 9:15-9:30 IST high/low per stock, enters on a breakout, exits on stop-loss, target, or the 3:15 PM square-off.
-- Risk rules: 1% risk per trade, 3% daily loss cap, max 3 trades/day, ~Rs 20/order cost model.
+- Risk rules: 1% risk per trade, 3% daily loss cap, max 3 trades/day, 0.10% round-trip cost + 0.05% slippage per side (adjustable via COST_PCT, SLIPPAGE_PCT; unverified estimates).
 - Requires Supabase to persist paper trades and verify there are no unresolved open trades before startup. The bot fails closed when trade persistence fails; it does not treat CSV fallback as safe position state.
 
 ## Run locally
