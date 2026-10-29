@@ -138,7 +138,7 @@ def test_startup_refuses_to_run_without_supabase(monkeypatch):
 
 def test_startup_refuses_when_previous_run_left_open_paper_trade(monkeypatch):
     monkeypatch.setattr(bot, "SB", _FakeSupabase([{"id": 1, "symbol": "RELIANCE.NS"}]))
-    with pytest.raises(RuntimeError, match="existing open paper trade"):
+    with pytest.raises(RuntimeError, match="refusing to start"):
         bot.assert_safe_startup()
 
 
@@ -209,3 +209,52 @@ def test_mark_persistence_failure_halts_new_entries_but_keeps_position(monkeypat
 def test_square_off_retry_and_fallback_constants():
     import bot
     assert bot.SQUARE_OFF < bot.SQUARE_OFF_FALLBACK < bot.MARKET_CLOSE
+
+
+def _row(i, sym, side, qty, entry, status, pnl=None, ts="2026-10-29T04:00:00+00:00"):
+    return {"id": i, "symbol": sym, "side": side, "qty": qty, "entry": entry, "status": status,
+            "pnl": pnl, "ts": ts, "llm_decision": None, "llm_reason": None}
+
+
+def test_restore_rebuilds_positions_cash_and_limits():
+    rows = [_row(1, "INFY.NS", "SELL", 1, 1128.7, "closed", pnl=-32.6),
+            _row(2, "TCS.NS", "SELL", 5, 2486.0, "open")]
+    st = bot.state_from_rows(rows, NOW)
+    pos = st.positions["TCS.NS"]
+    fee = bot.fee_for_notional(5 * 2486.0)
+    assert st.trades_today == 2 and st.done_symbols == {"INFY.NS", "TCS.NS"}
+    assert pos.row_id == 2 and pos.stop == pytest.approx(2486.0 * 1.01)
+    assert pos.target == pytest.approx(2486.0 - 2486.0 * 0.01 * 1.5)
+    assert st.day_pnl == pytest.approx(-32.6 - fee)
+    assert st.cash == pytest.approx(bot.CAPITAL - 32.6 - 5 * 2486.0 - fee)
+
+
+def test_startup_allows_todays_open_row_but_refuses_older(monkeypatch):
+    today = _row(1, "TCS.NS", "SELL", 5, 2486.0, "open")
+    monkeypatch.setattr(bot, "SB", _FakeSupabase([today]))
+    bot.assert_safe_startup(NOW)
+    old = _row(2, "TCS.NS", "SELL", 5, 2486.0, "open", ts="2026-10-28T04:00:00+00:00")
+    monkeypatch.setattr(bot, "SB", _FakeSupabase([old]))
+    with pytest.raises(RuntimeError, match="earlier day"):
+        bot.assert_safe_startup(NOW)
+
+
+class _Df:
+    def __init__(self, close, ts):
+        import pandas as pd
+        self._df = pd.DataFrame({"Close": [close]}, index=pd.DatetimeIndex([ts]))
+    empty = False
+    def __getattr__(self, k): return getattr(self._df, k)
+    def __getitem__(self, k): return self._df[k]
+
+
+def test_stale_or_invalid_yahoo_price_is_rejected(monkeypatch):
+    now = datetime.now(IST)
+    from datetime import timedelta
+    monkeypatch.setattr(bot, "FEED", None)
+    monkeypatch.setattr(bot, "fetch_candles", lambda s: _Df(100.0, now - timedelta(minutes=120)))
+    assert bot.last_price("X.NS") is None
+    monkeypatch.setattr(bot, "fetch_candles", lambda s: _Df(float("nan"), now))
+    assert bot.last_price("X.NS") is None
+    monkeypatch.setattr(bot, "fetch_candles", lambda s: _Df(100.0, now - timedelta(minutes=16)))
+    assert bot.last_price("X.NS") == 100.0

@@ -6,6 +6,7 @@ Opening-Range-Breakout PAPER trading bot for NSE stocks.
 - Logging: Supabase is required for safe startup and durable paper-trade state.
 """
 import csv
+import math
 import os
 import time
 import warnings
@@ -167,13 +168,44 @@ def fetch_candles(symbol: str):
     return df
 
 
+YAHOO_MAX_STALE_MIN = int(os.getenv("YAHOO_MAX_STALE_MIN", "30"))   # Yahoo is ~15 min late; older than this is rejected
+_LAST_SOURCE = {}
+
+
+def _valid_price(p):
+    return p is not None and math.isfinite(p) and p > 0
+
+
+def _note_source(symbol, source):
+    """Log every change of price source (angel / yahoo / none) once, so feed switches are auditable."""
+    if _LAST_SOURCE.get(symbol) != source:
+        print(f"[feed] {symbol}: {_LAST_SOURCE.get(symbol, 'start')} -> {source}")
+        _LAST_SOURCE[symbol] = source
+
+
 def last_price(symbol: str):
+    """Fresh, valid price or None. Stale or invalid quotes are rejected, never used."""
     if FEED is not None:
         p = FEED.last(symbol, datetime.now(IST))
-        if p is not None:
+        if _valid_price(p):
+            _note_source(symbol, "angel")
             return p          # live Angel One price
-    df = fetch_candles(symbol)   # Yahoo (also the fallback when the live feed has no fresh price)
-    return None if df.empty else float(df["Close"].iloc[-1])
+    try:
+        df = fetch_candles(symbol)   # Yahoo (also the fallback when the live feed has no fresh price)
+    except Exception as e:
+        print(f"[warn] {symbol}: Yahoo fetch failed ({type(e).__name__})")
+        df = None
+    if df is None or df.empty:
+        _note_source(symbol, "none")
+        return None
+    age_min = (datetime.now(IST) - df.index.max().to_pydatetime()).total_seconds() / 60
+    p = float(df["Close"].iloc[-1])
+    if age_min > YAHOO_MAX_STALE_MIN or not _valid_price(p):
+        print(f"[warn] {symbol}: rejected Yahoo price {p} (age {age_min:.0f} min)")
+        _note_source(symbol, "none")
+        return None
+    _note_source(symbol, "yahoo")
+    return p
 
 
 # ---------------- Strategy ----------------
@@ -401,41 +433,87 @@ def check_daily_cap(state: State):
         print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
 
 
-def assert_safe_startup():
-    """Refuse to start when paper-position state cannot be recovered safely.
+def _row_day(row):
+    try:
+        return datetime.fromisoformat(str(row["ts"]).replace("Z", "+00:00")).astimezone(IST).date()
+    except Exception:
+        return None
 
-    The bot currently keeps position state in memory. Starting without durable
-    Supabase logging, or while Supabase still has open rows from a prior process,
-    could forget an existing paper position and bypass its risk controls.
-    """
+
+def assert_safe_startup(now=None):
+    """Refuse to start only when open paper rows cannot be restored: no Supabase, unreadable rows, or rows
+    from a previous day (those need manual reconciliation). Today's open rows are restored by restore_state()."""
     if SB is None:
         raise RuntimeError(
             "Supabase persistence is required for safe startup; configure "
             "SUPABASE_URL and SUPABASE_KEY before running the paper bot."
         )
     try:
-        result = (SB.table("paper_trades").select("id,symbol")
+        result = (SB.table("paper_trades").select("id,symbol,ts")
                   .eq("status", "open").eq("mode", "paper").limit(20).execute())
     except Exception as exc:
         raise RuntimeError(
             "Cannot verify existing open paper trades; refusing to start. "
             "Check Supabase connectivity/schema and resolve the open positions first."
         ) from exc
-    open_rows = result.data or []
-    if open_rows:
-        symbols = ", ".join(str(row.get("symbol", "unknown")) for row in open_rows)
+    today = (now or datetime.now(IST)).date()
+    stale = [r for r in (result.data or []) if _row_day(r) != today]
+    if stale:
+        symbols = ", ".join(str(r.get("symbol", "unknown")) for r in stale)
         raise RuntimeError(
-            f"Found existing open paper trade(s) ({symbols}); refusing to start "
-            "because in-memory positions cannot be restored automatically. "
+            f"Found open paper trade(s) from an earlier day or with no timestamp ({symbols}); refusing to start. "
             "Reconcile/close these rows before restarting."
         )
+
+
+def state_from_rows(rows, now):
+    """Rebuild today's State from today's paper_trades rows (closed and open). Stop/target are recomputed from
+    the saved entry price with the same rules as try_entry."""
+    st = State()
+    realised, open_cost = 0.0, 0.0
+    for r in rows:
+        sym = r["symbol"]
+        st.trades_today += 1
+        st.done_symbols.add(sym)
+        if r.get("status") != "open":
+            realised += float(r.get("pnl") or 0)
+            continue
+        side, qty, entry = r["side"], int(r["qty"]), float(r["entry"])
+        d = 1 if side == "BUY" else -1
+        stop = entry * (1 - d * STOP_LOSS_PCT / 100)
+        target = entry + d * abs(entry - stop) * TARGET_RR
+        fee = fee_for_notional(qty * entry)
+        pos = Position(sym, side, qty, entry, stop, target, now, row_id=r.get("id"),
+                       llm_decision=r.get("llm_decision"), llm_reason=r.get("llm_reason"), entry_fee=fee)
+        try:
+            pos.opened_at = datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")).astimezone(IST)
+        except Exception:
+            pass
+        st.positions[sym] = pos
+        open_cost += qty * entry + fee
+        realised -= fee
+    st.day_pnl = realised
+    st.cash = CAPITAL + sum(float(r.get("pnl") or 0) for r in rows if r.get("status") != "open") - open_cost
+    return st
+
+
+def restore_state(now):
+    """State for a (re)started bot: rebuilt from today's Supabase rows so a restart never forgets a position."""
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    res = (SB.table("paper_trades").select("*").eq("mode", "paper").gte("ts", day0)
+           .order("id").limit(200).execute())
+    st = state_from_rows(res.data or [], now)
+    if st.trades_today:
+        print(f"[restore] {st.trades_today} trade(s) today, open: {sorted(st.positions) or 'none'}, "
+              f"day P&L {st.day_pnl:+.2f}, cash {st.cash:.2f}")
+    return st
 
 
 # ---------------- Main loop ----------------
 def run():
     global FEED
     assert_safe_startup()
-    state = State()
+    state = restore_state(datetime.now(IST))
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
     if DATA_SOURCE == "angel":
         feed = AngelFeed(SYMBOLS)
