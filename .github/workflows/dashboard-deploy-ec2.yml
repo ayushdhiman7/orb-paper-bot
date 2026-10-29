@@ -40,6 +40,8 @@ jobs:
         run: npm install
 
       - name: Build dashboard
+        env:
+          VITE_API_BASE_URL: https://orb7.duckdns.org
         run: npm run build
 
       - name: Upload built dashboard
@@ -61,7 +63,7 @@ jobs:
           test -n "$EC2_HOST"
           test -n "$EC2_SSH_KEY"
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/orb_dashboard_deploy
+          printf '%s\\n' "$EC2_SSH_KEY" > ~/.ssh/orb_dashboard_deploy
           chmod 600 ~/.ssh/orb_dashboard_deploy
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
