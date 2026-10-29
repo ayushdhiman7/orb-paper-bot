@@ -60,10 +60,10 @@ export async function loadDashboardData() {
   ]);
   if (trades.error) throw new Error(trades.error.message);
   if (controls.error) throw new Error(controls.error.message);
-  if (backtests.error) throw new Error(`Backtest data unavailable: ${backtests.error.message}`);
   return {
     trades: (trades.data ?? []) as PaperTrade[],
     controls: (controls.data ?? []) as ControlTrade[],
     backtests: (backtests.data ?? []) as BacktestRun[],
+    backtestsError: backtests.error?.message ?? null,
   };
 }
