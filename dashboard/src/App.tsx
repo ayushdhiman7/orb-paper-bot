@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bell, Bot, CalendarDays,
-  CheckCircle2, ChevronDown, CircleHelp, Clock3, Command, Database, Download,
+  CheckCircle2, ChevronDown, CircleHelp, Clock3, Database, Download,
   LayoutDashboard, ListFilter, Menu, RefreshCw, Search, Settings2, ShieldCheck,
   SlidersHorizontal, Sparkles, TrendingUp, Wallet, X,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { ControlTrade, isSupabaseConfigured, loadDashboardData, PaperTrade } from "./lib/supabase";
+import { isSupabaseConfigured, loadDashboardData } from "./lib/supabase";
+import type { ControlTrade, PaperTrade } from "./lib/supabase";
 
 type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor";
 type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[] };
@@ -39,7 +40,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [range, setRange] = useState("7D");
   const [sideFilter, setSideFilter] = useState("All sides");
   const [mobileNav, setMobileNav] = useState(false);
 
@@ -122,7 +122,6 @@ function MetricCard({ label, value, change, positive, icon: Icon, sub }: { label
 
 function Overview({ trades, totalPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, setTab }: { trades:PaperTrade[]; totalPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; setTab:(t:Tab)=>void }) {
   const recent = [...trades].sort((a,b) => new Date(b.ts).getTime()-new Date(a.ts).getTime()).slice(0,5);
-  const max = Math.max(100, ...equity.map(p => Math.abs(p.pnl)));
   return <>
     <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{["1D","7D","30D","ALL"].map(x=><button key={x} className={x==="7D"?"selected":""}>{x}</button>)}</div></div>
     <div className="metric-grid">
