@@ -100,3 +100,54 @@ def test_quote_failure_invalidates_previous_mark(monkeypatch):
     assert "TEST" not in state.last_prices
     bot.check_daily_cap(state)
     assert state.halted is True
+
+
+class _FakeQuery:
+    def __init__(self, rows=None, error=None):
+        self.rows = rows or []
+        self.error = error
+
+    def select(self, *_args):
+        return self
+
+    def eq(self, *_args):
+        return self
+
+    def limit(self, *_args):
+        return self
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return type("Result", (), {"data": self.rows})()
+
+
+class _FakeSupabase:
+    def __init__(self, rows=None, error=None):
+        self.query = _FakeQuery(rows, error)
+
+    def table(self, _name):
+        return self.query
+
+
+def test_startup_refuses_to_run_without_supabase(monkeypatch):
+    monkeypatch.setattr(bot, "SB", None)
+    with pytest.raises(RuntimeError, match="Supabase persistence is required"):
+        bot.assert_safe_startup()
+
+
+def test_startup_refuses_when_previous_run_left_open_paper_trade(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase([{"id": 1, "symbol": "RELIANCE.NS"}]))
+    with pytest.raises(RuntimeError, match="existing open paper trade"):
+        bot.assert_safe_startup()
+
+
+def test_startup_refuses_when_open_trade_check_fails(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase(error=OSError("offline")))
+    with pytest.raises(RuntimeError, match="Cannot verify existing open paper trades"):
+        bot.assert_safe_startup()
+
+
+def test_startup_allows_clean_paper_trade_table(monkeypatch):
+    monkeypatch.setattr(bot, "SB", _FakeSupabase())
+    bot.assert_safe_startup()
