@@ -177,7 +177,7 @@ def run_day(signals, cost_pct=None):
         value = qty * s["entry"]
         gross = (s["exit_fill"] - s["entry"]) * qty * s["side"]
         entry_fee = value * side_cost_pct / 100
-        exit_fee = max(0.0, (value + gross)) * side_cost_pct / 100
+        exit_fee = max(0.0, (value + gross * s["side"])) * side_cost_pct / 100
         net = gross - entry_fee - exit_fee
         cash -= value + entry_fee
         if cash < -1e-6:
