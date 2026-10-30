@@ -19,7 +19,7 @@ const preciseMoney = (value: number) => new Intl.NumberFormat("en-IN", { style: 
 const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 function App() {
   const [tab, setTab] = useState<Tab>("Overview");
-  const [data, setData] = useState<DashboardData>({ trades: [], controls: [], backtests: [] });
+  const [data, setData] = useState<DashboardData>({ trades: [], openPositions: [], controls: [], backtests: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef(0);
@@ -126,13 +126,13 @@ function App() {
           </div>
         ) : (
           <>
-            {data.trades.length === 0 && (
+            {data.trades.length === 0 && openTrades.length === 0 && (
               <div className="notice error-notice">
                 <ShieldCheck size={16} />
                 <span><strong>No paper trades found for {activeRange}.</strong> Try another range or refresh the data.</span>
               </div>
             )}
-            {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} unrealizedPnl={unrealizedPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
+            {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} unrealizedPnl={unrealizedPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange} openTrades={openTrades}/>}
             {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
             {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
             {tab === "Backtests" && <ResearchPage runs={data.backtests}/>}
