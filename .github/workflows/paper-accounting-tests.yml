@@ -2,7 +2,7 @@ name: paper-accounting-tests
 
 on:
   push:
-    branches: ["main", "phase0/**", "phase1/**"]
+    branches: ["main", "phase0/**", "phase1/**", "phase2/**"]
   pull_request:
     branches: ["main"]
 
