@@ -183,6 +183,7 @@ function TradeTable({ trades }: { trades:PaperTrade[] }) {
     const name=t.symbol.replace(".NS","");
     const tradePnl = getTradePnl(t);
     const pnl = tradePnl.value;
+    const open = tradePnl.kind === "unrealized";
     return <article className="trade-card" key={t.id}>
       <div className="trade-card-top">
         <span className="symbol-icon">{name.slice(0,2)}</span>
@@ -195,7 +196,7 @@ function TradeTable({ trades }: { trades:PaperTrade[] }) {
       <div className="trade-card-tags">
         <span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>AI: {t.llm_decision ?? "—"}</span>
         {t.exit_estimated && <span className="est-tag" title="Exit price was reconstructed, not observed. Excluded from confirmed P&L.">estimated exit</span>}
-        {open && <span className="mark-tag">unrealised · last {Number(t.last_price).toFixed(2)}</span>}
+        {open && <span className="mark-tag">unrealised · last {Number(t.last_price).toFixed(2)}</span>}{tradePnl.kind === "estimated" && <span className="est-tag">estimated · excluded from realised P&L</span>}
       </div>
     </article>;
   })}</div><div className="table-scroll"><table><thead><tr><th>Trade / symbol</th><th>Side</th><th>Entry → exit</th><th>Exit reason</th><th>AI decision</th><th>Net P&L</th><th>Timestamp</th></tr></thead><tbody>{trades.map(t=><tr key={t.id}><td><div className="symbol-cell"><span className="symbol-icon">{t.symbol.replace(".NS","").slice(0,2)}</span><div><strong>{t.symbol.replace(".NS","")}</strong><small>#{t.id}</small></div></div></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span></td><td><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit == null ? "Open" : Number(t.exit).toFixed(2)}</span></td><td><span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).replaceAll("_"," ")}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision ?? "—"}</span></td><td className={pnl==null?"":pnl>=0?"positive-text":"negative-text"}>{pnl == null ? "—" : <>{preciseMoney(pnl)}{tradePnl.kind==="unrealized" && <small className="pnl-kind">Unrealized</small>}{tradePnl.kind==="estimated" && <small className="pnl-kind">Estimated · excluded</small>}</>}</td><td className="date-cell">{formatDate(t.ts)}</td></tr>)}</tbody></table></div></>;
