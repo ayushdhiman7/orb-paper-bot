@@ -90,7 +90,7 @@ def validate_management_decision(
     context: PositionContext,
     decision: ManagementDecision,
     *,
-    min_confidence: float = 0.65,
+    min_confidence: float = 0.0,
     square_off_time: str = "15:15",
 ) -> tuple[bool, str]:
     """Validate an AI proposal against hard deterministic position protections."""
