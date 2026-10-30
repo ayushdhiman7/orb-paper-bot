@@ -266,18 +266,23 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 cursor = await run_in_threadpool(_latest_dashboard_event_id)
                 ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
                 yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
+                # Events committed after the cursor read but before/around the
+                # ready frame must be replayed; subscription buffering covers
+                # events arriving after this query starts.
+                missed = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
             else:
                 missed = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
-                for row in missed:
-                    cursor = max(cursor, int(row["id"]))
-                    body = json.dumps({
-                        "event_id": row["event_id"],
-                        "event_type": row["event_type"],
-                        "occurred_at": row["occurred_at"],
-                        "source": row["source"],
-                        "data": row["data"],
-                    }, separators=(",", ":"))
-                    yield f"id: {cursor}\nevent: {row['event_type']}\ndata: {body}\n\n"
+
+            for row in missed:
+                cursor = max(cursor, int(row["id"]))
+                body = json.dumps({
+                    "event_id": row["event_id"],
+                    "event_type": row["event_type"],
+                    "occurred_at": row["occurred_at"],
+                    "source": row["source"],
+                    "data": row["data"],
+                }, separators=(",", ":"))
+                yield f"id: {cursor}\nevent: {row['event_type']}\ndata: {body}\n\n"
 
             while not await request.is_disconnected():
                 try:
