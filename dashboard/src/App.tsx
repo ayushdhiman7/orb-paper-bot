@@ -27,6 +27,7 @@ function App() {
   const [sideFilter, setSideFilter] = useState("All sides");
   const [activeRange, setActiveRange] = useState<DashboardRange>("7D");
   const [mobileNav, setMobileNav] = useState(false);
+  const [streamConnected, setStreamConnected] = useState(false);
 
   const refresh = useCallback(async (range: DashboardRange) => {
     const currentRequest = ++requestId.current;
@@ -51,31 +52,25 @@ function App() {
     };
   }, [refresh, activeRange]);
 
-  // Server-Sent Events are notifications only; dashboard values always come from the API.
+  // Webhook -> API -> SSE is the only automatic update path. EventSource
+  // reconnects natively; never poll the dashboard API as a fallback.
   useEffect(() => {
     const source = new EventSource("/api/events/stream");
-    let connected = false;
-    source.onopen = () => { connected = true; };
-    source.onerror = () => { connected = false; };
-    // Refresh after the server establishes its initial event cursor. This closes
-    // the gap between the page's first API request and opening the event stream.
-    const onReady = () => { void refresh(activeRange); };
-    const onTradeEvent = () => { void refresh(activeRange); };
+    const onReady = () => {
+      setStreamConnected(true);
+      void refresh(activeRange);
+    };
+    const onTradeEvent = () => void refresh(activeRange);
+    const onResync = () => void refresh(activeRange);
+    source.onopen = () => setStreamConnected(true);
+    source.onerror = () => setStreamConnected(false);
     source.addEventListener("ready", onReady);
     source.addEventListener("trade.opened", onTradeEvent);
     source.addEventListener("trade.closed", onTradeEvent);
     source.addEventListener("bot.status_changed", onTradeEvent);
     source.addEventListener("risk.alert", onTradeEvent);
-
-    // Fallback refresh only while the event stream is disconnected.
-    const fallback = window.setInterval(() => {
-      if (!connected) void refresh(activeRange);
-    }, 30000);
-
-    return () => {
-      window.clearInterval(fallback);
-      source.close();
-    };
+    source.addEventListener("resync", onResync);
+    return () => source.close();
   }, [refresh, activeRange]);
 
   const closedTrades = data.trades.filter(
@@ -136,7 +131,7 @@ function App() {
     <nav className="bottom-nav" aria-label="Main">{navItems.map(item => <button key={item.label} className={`bottom-nav-item ${tab === item.label ? "active" : ""}`} aria-current={tab === item.label ? "page" : undefined} onClick={() => { setTab(item.label); window.scrollTo({ top: 0 }); }}><item.icon size={20}/><span>{item.short}</span></button>)}</nav>
     {mobileNav && <button className="mobile-scrim" onClick={() => setMobileNav(false)} aria-label="Close menu"/>}
     <main className="main-panel">
-      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span className="breadcrumb-parent">Workspace</span><span>/</span><strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill" aria-label="Paper trading environment"><span className="status-dot"/><span>Paper</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span className="breadcrumb-parent">Workspace</span><span>/</span><strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill" aria-label={streamConnected ? "Live event stream connected" : "Live event stream disconnected"}><span className={streamConnected ? "status-dot" : "status-dot status-offline"}/><span>{streamConnected ? "Live" : "Connecting"}</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
       <div className="content-wrap">
         <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh(activeRange)} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
         {loading ? (
