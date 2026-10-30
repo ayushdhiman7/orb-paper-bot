@@ -1,5 +1,8 @@
 """Regression tests for the process-wide ORB bot lock."""
 import os
+import subprocess
+import sys
+import time
 
 import bot
 
@@ -29,3 +32,42 @@ def test_lock_blocks_second_instance_and_releases_after_owner_closes(tmp_path, m
     assert replacement_fd is not None
     os.close(replacement_fd)
     monkeypatch.setattr(bot, "_INSTANCE_LOCK_FD", None)
+
+
+
+def test_lock_excludes_a_real_second_process_and_releases_on_exit(tmp_path):
+    lock_path = tmp_path / "orb-subprocess.lock"
+    env = os.environ.copy()
+    env["ORB_LOCK_FILE"] = str(lock_path)
+    script = (
+        "import time, bot; "
+        "assert bot.acquire_instance_lock(); "
+        "print('LOCKED', flush=True); "
+        "time.sleep(30)"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", script],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout.readline().strip() == "LOCKED"
+        previous = os.environ.get("ORB_LOCK_FILE")
+        os.environ["ORB_LOCK_FILE"] = str(lock_path)
+        try:
+            assert bot.acquire_instance_lock() is False
+        finally:
+            if previous is None:
+                os.environ.pop("ORB_LOCK_FILE", None)
+            else:
+                os.environ["ORB_LOCK_FILE"] = previous
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+    # The OS releases flock automatically when the owning process exits.
+    assert bot.acquire_instance_lock() is True
+    os.close(bot._INSTANCE_LOCK_FD)
+    bot._INSTANCE_LOCK_FD = None
