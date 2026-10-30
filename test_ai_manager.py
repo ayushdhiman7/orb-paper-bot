@@ -45,7 +45,7 @@ def test_target_can_only_be_extended_in_profit_direction():
 
 
 def test_low_confidence_or_missing_prices_fail_closed():
-    assert validate_management_decision(context(), ManagementDecision("EXIT", "low", .5))[1] == "confidence_below_threshold"
+    assert validate_management_decision(context(), ManagementDecision("EXIT", "low", .5), min_confidence=.65)[1] == "confidence_below_threshold"
     with pytest.raises(ValueError):
         parse_management_response('{"action":"MOVE_SL","reason":"x","confidence":0.9}')
 
