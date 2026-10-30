@@ -1,4 +1,8 @@
+import asyncio
+import hmac
+import json
 import os
+import time
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -6,7 +10,8 @@ from zoneinfo import ZoneInfo
 
 import pandas_market_calendars as market_calendars
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
@@ -19,6 +24,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
 UTC = timezone.utc
 PAGE_SIZE = 1000
+WEBHOOK_MAX_SKEW_SECONDS = 300
+EVENT_BATCH_SIZE = 100
 
 app = FastAPI(title="ORB Dashboard API")
 
@@ -84,6 +91,129 @@ def fetch_all_rows(client, table_name: str, timestamp_column: str, start_utc: st
         offset += PAGE_SIZE
 
     return rows
+
+
+def _webhook_secret() -> str:
+    return os.getenv("DASHBOARD_WEBHOOK_SECRET", "").strip()
+
+
+def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
+    secret = _webhook_secret()
+    if not secret or not timestamp or not signature:
+        return False
+    try:
+        sent_at = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+    if abs(time.time() - sent_at) > WEBHOOK_MAX_SKEW_SECONDS:
+        return False
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        timestamp.encode("ascii") + b"." + raw_body,
+        digestmod="sha256",
+    ).hexdigest()
+    supplied = signature.removeprefix("sha256=")
+    return hmac.compare_digest(expected, supplied)
+
+
+@app.post("/api/events")
+async def ingest_event(request: Request):
+    raw_body = await request.body()
+    timestamp = request.headers.get("X-ORB-Timestamp", "")
+    signature = request.headers.get("X-ORB-Signature", "")
+    if not _verify_webhook(raw_body, timestamp, signature):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_id = payload.get("event_id")
+    event_type = payload.get("event_type")
+    occurred_at = payload.get("occurred_at")
+    data = payload.get("data")
+    if (
+        not isinstance(event_id, str) or not event_id or len(event_id) > 128
+        or event_type not in {"trade.opened", "trade.closed", "bot.status_changed", "risk.alert"}
+        or not isinstance(occurred_at, str)
+        or not isinstance(data, dict)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid event payload")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+
+    try:
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        client.table("dashboard_events").upsert(
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "occurred_at": occurred_at,
+                "source": str(payload.get("source", "orb-paper-bot"))[:80],
+                "data": data,
+            },
+            on_conflict="event_id",
+            ignore_duplicates=True,
+        ).execute()
+        return {"status": "accepted", "event_id": event_id}
+    except Exception:
+        raise HTTPException(status_code=502, detail="Unable to persist dashboard event")
+
+
+@app.get("/api/events/stream")
+async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+
+    async def generate():
+        cursor = after
+        last_keepalive = time.monotonic()
+        while not await request.is_disconnected():
+            try:
+                client = create_client(SUPABASE_URL, SUPABASE_KEY)
+                rows = (
+                    client.table("dashboard_events")
+                    .select("id,event_id,event_type,occurred_at,source,data,received_at")
+                    .gt("id", cursor)
+                    .order("id")
+                    .limit(EVENT_BATCH_SIZE)
+                    .execute()
+                ).data or []
+                for row in rows:
+                    cursor = max(cursor, int(row["id"]))
+                    event_name = row["event_type"]
+                    body = json.dumps(
+                        {
+                            "event_id": row["event_id"],
+                            "event_type": event_name,
+                            "occurred_at": row["occurred_at"],
+                            "source": row["source"],
+                            "data": row["data"],
+                        },
+                        separators=(",", ":"),
+                    )
+                    yield f"id: {cursor}\\nevent: {event_name}\\ndata: {body}\\n\\n"
+                if rows:
+                    continue
+            except Exception:
+                # A transient database error must not terminate EventSource reconnect handling.
+                pass
+
+            if time.monotonic() - last_keepalive >= 15:
+                yield ": keep-alive\\n\\n"
+                last_keepalive = time.monotonic()
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/health")
