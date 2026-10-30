@@ -99,20 +99,21 @@ def _webhook_secret() -> str:
 
 def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
     secret = _webhook_secret()
-    if not secret or not timestamp or not signature:
+    if not secret or not timestamp or not signature.startswith("sha256="):
         return False
     try:
         sent_at = int(timestamp)
-    except (TypeError, ValueError):
+        timestamp_bytes = timestamp.encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError):
         return False
     if abs(time.time() - sent_at) > WEBHOOK_MAX_SKEW_SECONDS:
         return False
     expected = hmac.new(
         secret.encode("utf-8"),
-        timestamp.encode("ascii") + b"." + raw_body,
+        timestamp_bytes + b"." + raw_body,
         digestmod="sha256",
     ).hexdigest()
-    supplied = signature.removeprefix("sha256=")
+    supplied = signature[len("sha256="):]
     return hmac.compare_digest(expected, supplied)
 
 
@@ -143,6 +144,12 @@ async def ingest_event(request: Request):
         or not isinstance(data, dict)
     ):
         raise HTTPException(status_code=422, detail="Invalid event payload")
+    try:
+        parsed_occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        if parsed_occurred_at.tzinfo is None:
+            raise ValueError("Event timestamp must include a timezone")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid event timestamp")
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
 
@@ -191,7 +198,11 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 if latest:
                     cursor = int(latest[0]["id"])
             except Exception:
-                pass
+                # If the snapshot fails, cursor remains zero and the stream catches up.
+                cursor = 0
+            # Tell the browser the snapshot boundary. It refreshes authoritative data
+            # after this point, while events committed later are delivered below.
+            yield f"id: {cursor}\nevent: ready\ndata: {{\"cursor\":{cursor}}}\n\n"
         last_keepalive = time.monotonic()
         while not await request.is_disconnected():
             try:
