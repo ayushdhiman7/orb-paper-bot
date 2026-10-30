@@ -14,6 +14,7 @@ def test_defaults_preserve_approved_limits(monkeypatch):
     assert settings.risk_per_trade_pct == 1.0
     assert settings.max_gemini_requests_per_day == 100
     assert settings.max_gemini_requests_per_minute == 5
+    assert settings.min_ai_confidence == 0.0
     assert settings.square_off_time == "15:15"
     assert settings.paper_only is True
 
