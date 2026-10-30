@@ -107,7 +107,7 @@ class AngelWebSocketFeed:
 
     @staticmethod
     def _timestamp(packet):
-        raw = packet.get("last_traded_timestamp") or packet.get("exchange_timestamp")
+        raw = packet.get("exchange_timestamp") or packet.get("last_traded_timestamp")
         if raw is None:
             raise ValueError("quote packet has no exchange timestamp")
         value = float(raw)
