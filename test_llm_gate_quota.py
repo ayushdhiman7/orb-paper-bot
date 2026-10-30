@@ -1,6 +1,3 @@
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 import llm_gate
 
 
@@ -26,12 +23,31 @@ def test_every_http_attempt_reserves_quota(monkeypatch):
         if len(calls) == 1:
             raise llm_gate.urllib.error.HTTPError("url", 400, "bad config", {}, None)
         return {"candidates": [{"content": {"parts": [{"text": '{"decision":"take","reason":"ok"}'}]}}]}
-    monkeypatch.setattr(llm_gate, "_post", post)
 
+    monkeypatch.setattr(llm_gate, "_post", post)
     result = llm_gate._ask("prompt", ("take", "skip"))
     assert result["decision"] == "take"
     assert quota.calls == 2
     assert len(calls) == 2
+
+
+def test_model_fallback_also_consumes_a_quota_slot(monkeypatch):
+    quota = FakeQuota([(True, "reserved"), (True, "reserved")])
+    monkeypatch.setattr(llm_gate, "_quota", quota)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(llm_gate, "_models", lambda: ["missing-model", "working-model"])
+    calls = []
+
+    def post(model, body, key):
+        calls.append(model)
+        if model == "missing-model":
+            raise llm_gate.urllib.error.HTTPError("url", 404, "missing", {}, None)
+        return {"candidates": [{"content": {"parts": [{"text": '{"decision":"take","reason":"ok"}'}]}}]}
+
+    monkeypatch.setattr(llm_gate, "_post", post)
+    assert llm_gate._ask("prompt", ("take", "skip"))["decision"] == "take"
+    assert calls == ["missing-model", "working-model"]
+    assert quota.calls == 2
 
 
 def test_quota_denial_prevents_network_call(monkeypatch):
