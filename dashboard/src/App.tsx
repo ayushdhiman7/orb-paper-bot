@@ -32,6 +32,12 @@ const demoControls: ControlTrade[] = [
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 const preciseMoney = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
 const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const getRangeStart = (range: string) => {
+  if (range === "ALL") return null;
+  const now = new Date();
+  if (range === "1D") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return new Date(now.getTime() - (range === "30D" ? 30 : 7) * 86400000);
+};
 
 function App() {
   const [tab, setTab] = useState<Tab>("Overview");
@@ -61,16 +67,22 @@ function App() {
 
   const closedTrades = useMemo(() => {
     const closed = data.trades.filter(t => t.status !== "open" && t.pnl !== null && !t.exit_estimated);
-    if (activeRange === "ALL") return closed;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (activeRange === "1D" ? 1 : activeRange === "30D" ? 30 : 7));
-    return closed.filter(t => new Date(t.ts) >= cutoff);
+    const rangeStart = getRangeStart(activeRange);
+    return closed.filter(t => !rangeStart || new Date(t.ts) >= rangeStart);
   }, [data.trades, activeRange]);
   const totalPnl = closedTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
   const winners = closedTrades.filter(t => Number(t.pnl) > 0).length;
   const winRate = closedTrades.length ? winners / closedTrades.length * 100 : 0;
   const openTrades = data.trades.filter(t => t.status === "open");
-  const controlTrades = data.controls.filter(t => t.pnl !== null && (activeRange === "ALL" || new Date(t.ts) >= new Date(Date.now() - (activeRange === "1D" ? 1 : activeRange === "30D" ? 30 : 7) * 86400000)));
+  const recentTrades = useMemo(() => {
+    const rangeStart = getRangeStart(activeRange);
+    return data.trades
+      .filter(t => !rangeStart || new Date(t.ts) >= rangeStart)
+      .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+      .slice(0, 5);
+  }, [data.trades, activeRange]);
+  const controlRangeStart = getRangeStart(activeRange);
+  const controlTrades = data.controls.filter(t => t.pnl !== null && (!controlRangeStart || new Date(t.ts) >= controlRangeStart));
   const tradeById = new Map(closedTrades.map(t => [String(t.id), t]));
   const matchedControls = controlTrades.filter(c => c.trade_id != null && c.pnl != null && tradeById.has(String(c.trade_id)) && tradeById.get(String(c.trade_id))?.pnl != null && !tradeById.get(String(c.trade_id))?.exit_estimated);
   const matchedTradeIds = new Set(matchedControls.map(c => String(c.trade_id)));
@@ -115,14 +127,14 @@ function App() {
     <nav className="bottom-nav" aria-label="Main">{navItems.map(item => <button key={item.label} className={`bottom-nav-item ${tab === item.label ? "active" : ""}`} aria-current={tab === item.label ? "page" : undefined} onClick={() => { setTab(item.label); window.scrollTo({ top: 0 }); }}><item.icon size={20}/><span>{item.short}</span></button>)}</nav>
     {mobileNav && <button className="mobile-scrim" onClick={() => setMobileNav(false)} aria-label="Close menu"/>}
     <main className="main-panel">
-      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb">Workspace <span>/</span> <strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill"><span className="status-dot"/><span>Paper environment</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span className="breadcrumb-parent">Workspace</span><span>/</span><strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill" aria-label="Paper trading environment"><span className="status-dot"/><span>Paper</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
       <div className="content-wrap">
         <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
         {demo && <div className="notice demo-notice"><Sparkles size={16}/><span><strong>Preview mode.</strong> Sample data is shown. Add your Supabase URL and publishable/anon key to load your real paper-trading records.</span><span className="notice-tag">DEMO DATA</span></div>}
         {error && <div className="notice error-notice"><Database size={16}/><span><strong>Could not refresh trade data.</strong> {error} Live records are hidden rather than replaced with sample numbers.</span><button className="text-button" onClick={() => void refresh()}>Retry</button></div>}
         
         {!demo && !error && data.trades.length === 0 && <div className="notice error-notice"><ShieldCheck size={16}/><span><strong>The backend returned no paper-trade rows.</strong> Check the backend query and authentication. The React app does not connect to Supabase directly.</span></div>}
-        {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
+        {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
         {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
         {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
         {tab === "Backtests" && <ResearchPage runs={data.backtests}/>} 
@@ -137,8 +149,7 @@ function MetricCard({ label, value, change, positive, icon: Icon, sub }: { label
   return <div className="metric-card"><div className="metric-top"><span>{label}</span><div className="metric-icon"><Icon size={17}/></div></div><div className="metric-value">{value}</div><div className="metric-bottom">{change && <span className={positive ? "change positive" : "change negative"}>{positive ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>} {change}</span>}<span className="metric-sub">{sub}</span></div></div>;
 }
 
-function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, setTab, activeRange, setActiveRange }: { trades:PaperTrade[]; totalPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; setTab:(t:Tab)=>void; activeRange:string; setActiveRange:(v:string)=>void }) {
-  const recent = [...trades].sort((a,b) => new Date(b.ts).getTime()-new Date(a.ts).getTime()).slice(0,5);
+function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, recentTrades, setTab, activeRange, setActiveRange }: { trades:PaperTrade[]; totalPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; recentTrades:PaperTrade[]; setTab:(t:Tab)=>void; activeRange:string; setActiveRange:(v:string)=>void }) {
   return <>
     <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{["1D","7D","30D","ALL"].map(x=><button key={x} onClick={()=>setActiveRange(x)} className={activeRange===x?"selected":""}>{x}</button>)}</div></div>
     <div className="metric-grid">
@@ -151,7 +162,7 @@ function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkippe
       <section className="panel equity-panel"><div className="panel-heading"><div><h3>Equity progression</h3><p>Cumulative realized P&L · INR</p></div><button className="select-chip">Cumulative <ChevronDown size={14}/></button></div><div className="chart-summary"><strong className={totalPnl >= 0 ? "positive-text":"negative-text"}>{preciseMoney(totalPnl)}</strong><span>Net realized</span><span className="chart-legend"><i/> Cumulative P&L</span></div><div className="equity-chart">{equity.length > 1 ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={equity} margin={{top:10,right:8,left:0,bottom:0}}><defs><linearGradient id="pnlFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#9ae6b4" stopOpacity={0.23}/><stop offset="100%" stopColor="#9ae6b4" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid stroke="#242832" strokeDasharray="3 5" vertical={false}/><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:"#777e8e",fontSize:11}}/><YAxis axisLine={false} tickLine={false} tick={{fill:"#777e8e",fontSize:11}} tickFormatter={v=>`₹${v}`} width={54}/><Tooltip contentStyle={{background:"#151821",border:"1px solid #303441",borderRadius:10,color:"#f5f6f8"}} formatter={(v)=>[preciseMoney(Number(v)),"Cumulative P&L"]}/><Area type="monotone" dataKey="pnl" stroke="#9ae6b4" strokeWidth={2.5} fill="url(#pnlFill)" activeDot={{r:4,fill:"#9ae6b4",stroke:"#10130f"}}/></AreaChart></ResponsiveContainer> : <div className="empty-chart"><Activity size={25}/><strong>Not enough history yet</strong><span>More closed trading sessions will build this chart.</span></div>}</div><div className="chart-foot"><span><i className="tiny-dot green-dot"/> Realized results only</span><span><Clock3 size={13}/> Updates when data refreshes</span></div></section>
       <section className="panel control-panel"><div className="panel-heading"><div><h3>AI control group</h3><p>AI strategy against no-AI baseline</p></div><div className="control-icon"><Bot size={18}/></div></div><div className="control-callout"><div className="callout-label">NO-AI CONTROL P&L</div><strong className={controlPnl>=0?"positive-text":"negative-text"}>{money(controlPnl)}</strong><span>{controls} completed control trades</span></div><div className="comparison-line"><div><span>AI strategy (matched)</span><strong className={matchedAiPnl>=0?"positive-text":"negative-text"}>{money(matchedAiPnl)}</strong></div><div><span>No-AI control (matched)</span><strong>{money(controlPnl)}</strong></div></div><div className="mini-bar"><span style={{width:`${Math.max(8,Math.min(100,Math.abs(matchedAiPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/><i style={{width:`${Math.max(8,Math.min(100,Math.abs(controlPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/></div><button className="panel-link" onClick={()=>setTab("AI vs no-AI")}>Explore AI impact <ArrowUpRight size={15}/></button><div className="research-note"><ShieldCheck size={15}/><span>Control results are hypothetical and do not place orders.</span></div></section>
     </div>
-    <section className="panel table-panel"><div className="panel-heading"><div><h3>Recent trades</h3><p>Your latest simulated executions</p></div><button className="panel-link" onClick={()=>setTab("Trade journal")}>View journal <ArrowUpRight size={15}/></button></div><TradeTable trades={recent}/></section>
+    <section className="panel table-panel"><div className="panel-heading"><div><h3>Recent trades</h3><p>Your latest simulated executions</p></div><button className="panel-link" onClick={()=>setTab("Trade journal")}>View journal <ArrowUpRight size={15}/></button></div><TradeTable trades={recentTrades}/></section>
     <div className="bottom-grid"><section className="panel insight-panel"><div className="panel-heading"><div><h3>Strategy signals</h3><p>Quick read from your current sample</p></div><Sparkles size={17} className="muted-icon"/></div><div className="insight-row"><div className="insight-symbol"><Bot size={16}/></div><div className="insight-copy"><strong>AI decisions recorded</strong><span>{aiSkipped} skip decisions across visible trades</span></div><span className="insight-value">{trades.length ? `${Math.round(aiSkipped/Math.max(1,trades.length)*100)}%` : "—"}</span></div><div className="insight-row"><div className="insight-symbol"><Activity size={16}/></div><div className="insight-copy"><strong>Control group coverage</strong><span>Completed no-AI outcomes stored</span></div><span className="insight-value">{controls}</span></div></section><section className="panel quick-panel"><div className="panel-heading"><div><h3>Workspace status</h3><p>Data & execution safety</p></div><CheckCircle2 size={17} className="positive-text"/></div><div className="status-row"><span>Execution environment</span><strong><i className="tiny-dot green-dot"/> Paper only</strong></div><div className="status-row"><span>Dashboard data</span><strong>{isApiConfigured ? "Supabase configured" : "Preview mode"}</strong></div><div className="status-row"><span>Broker order routing</span><strong>Disabled</strong></div></section></div>
   </>;
 }
