@@ -599,6 +599,35 @@ def restore_state(now):
     return st
 
 
+# ---------------- Single-instance safety ----------------
+_INSTANCE_LOCK_FD = None
+
+
+def acquire_instance_lock():
+    """Hold an OS-level non-blocking lock for the entire bot process lifetime."""
+    global _INSTANCE_LOCK_FD
+    import fcntl
+
+    lock_path = os.getenv("ORB_LOCK_FILE", "/tmp/orb-paper-bot.lock")
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        print(f"[safety] another ORB bot instance already holds {lock_path}; exiting")
+        return False
+
+    _INSTANCE_LOCK_FD = fd  # Keep the descriptor open; the kernel releases the lock on process exit.
+    print(f"[safety] single-instance lock acquired: {lock_path}")
+    return True
+
+
 # ---------------- Main loop ----------------
 def run():
     global FEED
@@ -674,4 +703,5 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    if acquire_instance_lock():
+        run()
