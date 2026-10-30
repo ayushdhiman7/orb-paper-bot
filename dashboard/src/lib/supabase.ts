@@ -19,7 +19,7 @@ export type BacktestRun = {
   id: number | string; created_at: string; summary_md: string | null;
   result: Record<string, any>;
 };
-export type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[] };
+export type DashboardData = { trades: PaperTrade[]; openPositions: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[] };
 
 export async function loadDashboardData(range: DashboardRange): Promise<DashboardData> {
   if (!apiBase) throw new Error("Backend API is not configured. Set VITE_API_BASE_URL.");
@@ -36,6 +36,7 @@ export async function loadDashboardData(range: DashboardRange): Promise<Dashboar
   }
   return {
     trades: data.trades as PaperTrade[],
+    openPositions: (Array.isArray(data.open_positions) ? data.open_positions : (data.trades as PaperTrade[]).filter(t => t.status === "open")) as PaperTrade[],
     controls: data.controls as ControlTrade[],
     backtests: data.backtests as BacktestRun[],
   };
