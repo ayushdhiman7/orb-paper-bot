@@ -1,7 +1,7 @@
 """Best-effort, durable bot-to-dashboard event delivery.
 
-This module never raises into the trading path. Events are written to a local
-JSONL outbox and delivered by a daemon worker with HMAC authentication.
+Events are written to a local JSONL outbox and delivered by a daemon worker
+with HMAC authentication. Delivery failures never enter the trading path.
 """
 import hashlib
 import hmac
@@ -28,9 +28,10 @@ def _outbox_path() -> Path:
 
 
 def _configuration():
-    url = os.getenv("DASHBOARD_WEBHOOK_URL", "").strip()
-    secret = os.getenv("DASHBOARD_WEBHOOK_SECRET", "").strip()
-    return url, secret
+    return (
+        os.getenv("DASHBOARD_WEBHOOK_URL", "").strip(),
+        os.getenv("DASHBOARD_WEBHOOK_SECRET", "").strip(),
+    )
 
 
 def _append(payload: dict) -> None:
@@ -62,8 +63,7 @@ def _remove_sent(event_id: str) -> None:
         return
     with _LOCK:
         lines = path.read_text(encoding="utf-8").splitlines()
-        kept = []
-        removed = False
+        kept, removed = [], False
         for line in lines:
             if not removed:
                 try:
@@ -82,14 +82,10 @@ def _post(payload: dict, url: str, secret: str) -> bool:
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     timestamp = str(int(time.time()))
     signature = hmac.new(
-        secret.encode("utf-8"),
-        timestamp.encode("ascii") + b"." + body,
-        hashlib.sha256,
+        secret.encode("utf-8"), timestamp.encode("ascii") + b"." + body, hashlib.sha256
     ).hexdigest()
     request = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
+        url, data=body, method="POST",
         headers={
             "Content-Type": "application/json",
             "X-ORB-Timestamp": timestamp,
@@ -122,19 +118,23 @@ def _worker() -> None:
                 _STOP.wait(backoff)
                 backoff = min(_MAX_BACKOFF, backoff * 2)
         except Exception as exc:
-            # Do not print payloads, URLs, signatures, or secrets.
             print(f"[warn] dashboard webhook delivery deferred ({type(exc).__name__})")
             _STOP.wait(backoff)
             backoff = min(_MAX_BACKOFF, backoff * 2)
 
 
-def _start_worker() -> None:
+def start() -> bool:
+    """Start delivery and drain any persisted outbox after process startup."""
     global _STARTED
+    url, secret = _configuration()
+    if not url or not secret:
+        return False
     with _LOCK:
         if _STARTED:
-            return
+            return True
         _STARTED = True
         threading.Thread(target=_worker, name="dashboard-webhook", daemon=True).start()
+    return True
 
 
 def emit(event_type: str, occurred_at: datetime, data: dict) -> bool:
@@ -151,7 +151,7 @@ def emit(event_type: str, occurred_at: datetime, data: dict) -> bool:
     }
     try:
         _append(payload)
-        _start_worker()
+        start()
         return True
     except Exception as exc:
         print(f"[warn] dashboard webhook queue unavailable ({type(exc).__name__})")
