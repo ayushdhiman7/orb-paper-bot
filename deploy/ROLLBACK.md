@@ -52,15 +52,17 @@ The automatic updater's rollback only resets the Git commit after a failed insta
 
 If dashboard files changed, republish the matching dashboard build using the repository's documented deployment procedure. Do not assume a Git rollback alone restores the Nginx document root.
 
-## 6. Reinstall units only if unit files changed
+## 6. Reinstall the bot unit only if it changed
+
+Do not run the full `deploy/install.sh` for a bot-unit-only rollback: it also installs dependencies and enables all three timers. Render and install only the bot unit:
 
 ```bash
-bash deploy/install.sh
+sed -e "s|__DIR__|$PWD|g" -e "s|__USER__|$(id -un)|g" deploy/orb-bot.service | sudo tee /etc/systemd/system/orb-bot.service >/dev/null
 sudo systemctl daemon-reload
 systemctl cat orb-bot.service
 ```
 
-The installer enables timers and installs dependencies. Review its effects before running it; do not run it merely for a Python-only rollback.
+If the update also intentionally changed timer or watchdog units, review those files and install only the specific approved units. Do not enable or start timers as an incidental rollback side effect.
 
 ## 7. Resume updates only after verification
 
