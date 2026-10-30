@@ -16,7 +16,7 @@ type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 const preciseMoney = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
-const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 function App() {
   const [tab, setTab] = useState<Tab>("Overview");
   const [data, setData] = useState<DashboardData>({ trades: [], controls: [], backtests: [] });
