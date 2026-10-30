@@ -210,3 +210,13 @@ button,select,input,a{touch-action:manipulation}
 .dashboard-loader span {
   font-size: 11px;
 }
+
+/* Keep P&L qualification identical in desktop journal rows and mobile cards. */
+.pnl-kind {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 550;
+  white-space: nowrap;
+}
