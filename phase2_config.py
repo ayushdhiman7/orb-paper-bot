@@ -25,7 +25,7 @@ class Phase2Settings:
     risk_per_trade_pct: float = 1.0
     max_gemini_requests_per_day: int = 100
     max_gemini_requests_per_minute: int = 5
-    min_ai_confidence: float = 0.65
+    min_ai_confidence: float = 0.0
     max_trades_per_day: int = 3
     daily_loss_cap_pct: float = 3.0
     square_off_time: str = "15:15"
@@ -40,7 +40,7 @@ class Phase2Settings:
             risk_per_trade_pct=_float("RISK_PER_TRADE_PCT", 1.0, 0.01, 1.0),
             max_gemini_requests_per_day=_int("GEMINI_MAX_REQUESTS_PER_DAY", 100),
             max_gemini_requests_per_minute=_int("GEMINI_MAX_REQUESTS_PER_MINUTE", 5),
-            min_ai_confidence=_float("AI_MIN_CONFIDENCE", 0.65, 0.0, 1.0),
+            min_ai_confidence=_float("AI_MIN_CONFIDENCE", 0.0, 0.0, 1.0),
             max_trades_per_day=_int("MAX_TRADES_PER_DAY", 3),
             daily_loss_cap_pct=_float("DAILY_LOSS_CAP_PCT", 3.0, 0.01, 100.0),
             square_off_time=os.getenv("SQUARE_OFF_TIME", "15:15"),
