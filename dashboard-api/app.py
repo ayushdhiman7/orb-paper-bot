@@ -2,7 +2,7 @@ import asyncio
 import hmac
 import json
 import os
-import time
+import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -106,7 +106,7 @@ def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
         timestamp_bytes = timestamp.encode("ascii")
     except (TypeError, ValueError, UnicodeEncodeError):
         return False
-    if abs(time.time() - sent_at) > WEBHOOK_MAX_SKEW_SECONDS:
+    if abs(time_module.time() - sent_at) > WEBHOOK_MAX_SKEW_SECONDS:
         return False
     expected = hmac.new(
         secret.encode("utf-8"),
