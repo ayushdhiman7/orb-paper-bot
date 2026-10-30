@@ -217,7 +217,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                         },
                         separators=(",", ":"),
                     )
-                    yield f"id: {cursor}\\nevent: {event_name}\\ndata: {body}\\n\\n"
+                    yield f"id: {cursor}\nevent: {event_name}\ndata: {body}\n\n"
                 if rows:
                     continue
             except Exception:
@@ -225,7 +225,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 pass
 
             if time.monotonic() - last_keepalive >= 15:
-                yield ": keep-alive\\n\\n"
+                yield ": keep-alive\n\n"
                 last_keepalive = time.monotonic()
             await asyncio.sleep(2)
 
