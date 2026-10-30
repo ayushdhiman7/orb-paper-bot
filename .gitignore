@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 trades.csv
 .angel_cache/
+dashboard/node_modules/
+dashboard/dist/
