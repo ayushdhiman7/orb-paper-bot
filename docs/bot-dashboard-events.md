@@ -7,8 +7,8 @@ it appends a lifecycle event to a local JSONL outbox. A background worker delive
 the event to the dashboard API with an HMAC-SHA256 signature. Delivery failures are
 retried with exponential backoff; they do not alter trade state or broker behavior.
 
-The API deduplicates by `event_id` in `public.dashboard_events`. The React dashboard
-uses Server-Sent Events as a notification channel and reloads authoritative data from
+The API deduplicates by `event_id` in `public.dashboard_events`. Webhook timestamps must be timezone-aware ISO-8601 values, and signatures must use the `sha256=` HMAC-SHA256 header format. The React dashboard
+uses Server-Sent Events as a notification channel. On connection, the API sends a `ready` event with the initial database cursor; the dashboard refreshes authoritative data at that boundary, then reloads data from
 `/api/dashboard`. SSE reconnects resume using `Last-Event-ID`; while disconnected,
 the dashboard falls back to a 30-second refresh.
 
