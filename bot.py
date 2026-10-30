@@ -99,7 +99,7 @@ def get_supabase():
     return create_client(url, key)
 
 
-SB = get_supabase()
+SB = None  # Initialized only after the process-wide lock is acquired.
 
 
 def log_entry(pos):
@@ -630,7 +630,11 @@ def acquire_instance_lock():
 
 # ---------------- Main loop ----------------
 def run():
-    global FEED
+    global FEED, SB
+    # The entry point acquires the single-instance lock before run() is called.
+    # Defer client creation until here so a duplicate process exits without initializing services.
+    if SB is None:
+        SB = get_supabase()
     assert_safe_startup()
     webhook.start()  # Drain events persisted by a previous process before today's session.
     state = restore_state(datetime.now(IST))
