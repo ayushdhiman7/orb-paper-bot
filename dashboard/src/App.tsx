@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bell, Bot, CalendarDays,
   CheckCircle2, ChevronDown, CircleHelp, Clock3, Database, Download,
@@ -8,81 +8,59 @@ import {
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { isApiConfigured, loadDashboardData } from "./lib/supabase";
-import type { BacktestRun, ControlTrade, PaperTrade } from "./lib/supabase";
+import { loadDashboardData } from "./lib/supabase";
+import type { BacktestRun, ControlTrade, DashboardRange, PaperTrade } from "./lib/supabase";
 
 type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor";
 type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[]; backtestsError?: string | null };
 
-const demoTrades: PaperTrade[] = [
-  { id: 901, ts: "2026-10-29T09:44:00+05:30", symbol: "RELIANCE.NS", side: "BUY", qty: 8, entry: 1468.2, exit: 1481.4, pnl: 94.62, reason: "target", status: "closed", llm_decision: "take", llm_reason: "Breakout holds above opening range." },
-  { id: 900, ts: "2026-10-29T09:38:00+05:30", symbol: "TCS.NS", side: "SELL", qty: 3, entry: 3140.5, exit: 3152.8, pnl: -47.2, reason: "stop_loss", status: "closed", llm_decision: "take", llm_reason: "Momentum confirmed below range." },
-  { id: 899, ts: "2026-10-28T11:16:00+05:30", symbol: "INFY.NS", side: "BUY", qty: 10, entry: 1538.1, exit: 1551.6, pnl: 119.4, reason: "target", status: "closed", llm_decision: "skip", llm_reason: "Mixed momentum; volume confirmation weak." },
-  { id: 898, ts: "2026-10-28T10:02:00+05:30", symbol: "HDFCBANK.NS", side: "SELL", qty: 7, entry: 968.5, exit: 972.2, pnl: -35.8, reason: "stop_loss", status: "closed", llm_decision: "take", llm_reason: "Range breakdown with follow-through." },
-  { id: 897, ts: "2026-10-27T12:03:00+05:30", symbol: "ICICIBANK.NS", side: "BUY", qty: 9, entry: 1284.7, exit: 1300.3, pnl: 126.2, reason: "target", status: "closed", llm_decision: "take", llm_reason: "Price structure supports continuation." },
-  { id: 896, ts: "2026-10-27T09:53:00+05:30", symbol: "RELIANCE.NS", side: "SELL", qty: 8, entry: 1472.0, exit: 1480.1, pnl: -72.4, reason: "stop_loss", status: "closed", llm_decision: "skip", llm_reason: "Breakout appears stretched." },
-];
-const demoControls: ControlTrade[] = [
-  { id: 21, trade_id: 901, symbol: "RELIANCE.NS", variant: "no_ai_control", side: "BUY", qty: 8, entry_price: 1468.2, exit_price: 1481.4, exit_reason: "target", ai_decision: "take", pnl: 94.62, baseline_pnl: null, ts: "2026-10-29T10:02:00+05:30" },
-  { id: 20, trade_id: 900, symbol: "TCS.NS", variant: "no_ai_control", side: "SELL", qty: 3, entry_price: 3140.5, exit_price: 3152.8, exit_reason: "stop_loss", ai_decision: "take", pnl: -47.2, baseline_pnl: null, ts: "2026-10-29T10:15:00+05:30" },
-  { id: 19, trade_id: null, symbol: "INFY.NS", variant: "no_ai_control", side: "BUY", qty: 10, entry_price: 1538.1, exit_price: 1551.6, exit_reason: "target", ai_decision: "skip", pnl: 119.4, baseline_pnl: null, ts: "2026-10-28T11:35:00+05:30" },
-  { id: 18, trade_id: 898, symbol: "HDFCBANK.NS", variant: "no_ai_control", side: "SELL", qty: 7, entry_price: 968.5, exit_price: 972.2, exit_reason: "stop_loss", ai_decision: "take", pnl: -35.8, baseline_pnl: null, ts: "2026-10-28T10:25:00+05:30" },
-  { id: 17, trade_id: null, symbol: "ICICIBANK.NS", variant: "no_ai_control", side: "BUY", qty: 9, entry_price: 1284.7, exit_price: 1300.3, exit_reason: "target", ai_decision: "skip", pnl: 126.2, baseline_pnl: null, ts: "2026-10-27T12:22:00+05:30" },
-];
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 const preciseMoney = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
 const formatDate = (value: string) => new Date(value).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-const getRangeStart = (range: string) => {
-  if (range === "ALL") return null;
-  const now = new Date();
-  if (range === "1D") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return new Date(now.getTime() - (range === "30D" ? 30 : 7) * 86400000);
-};
-
 function App() {
   const [tab, setTab] = useState<Tab>("Overview");
-  const [data, setData] = useState<DashboardData>({ trades: demoTrades, controls: demoControls, backtests: [] });
-  const [demo, setDemo] = useState(true);
+  const [data, setData] = useState<DashboardData>({ trades: [], controls: [], backtests: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const requestId = useRef(0);
   const [query, setQuery] = useState("");
   const [sideFilter, setSideFilter] = useState("All sides");
-  const [activeRange, setActiveRange] = useState("7D");
+  const [activeRange, setActiveRange] = useState<DashboardRange>("7D");
   const [mobileNav, setMobileNav] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (!isApiConfigured) { setDemo(true); return; }
-    setLoading(true); setError("");
+  const refresh = useCallback(async (range: DashboardRange) => {
+    const currentRequest = ++requestId.current;
+    setLoading(true);
+    setError("");
     try {
-      const fresh = await loadDashboardData();
-      setData(fresh); setDemo(false);
+      const fresh = await loadDashboardData(range);
+      if (currentRequest === requestId.current) setData(fresh);
     } catch (e) {
-      setData({ trades: [], controls: [], backtests: [] });
-      setDemo(false);
-      setError(e instanceof Error ? e.message : "Could not load dashboard data.");
-    } finally { setLoading(false); }
+      if (currentRequest === requestId.current) {
+        setError(e instanceof Error ? e.message : "Could not load dashboard data.");
+      }
+    } finally {
+      if (currentRequest === requestId.current) setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh(activeRange);
+  }, [refresh, activeRange]);
 
-  const closedTrades = useMemo(() => {
-    const closed = data.trades.filter(t => t.status !== "open" && t.pnl !== null && !t.exit_estimated);
-    const rangeStart = getRangeStart(activeRange);
-    return closed.filter(t => !rangeStart || new Date(t.ts) >= rangeStart);
-  }, [data.trades, activeRange]);
+  const closedTrades = data.trades.filter(
+    t => t.status !== "open" && t.pnl !== null && !t.exit_estimated,
+  );
   const totalPnl = closedTrades.reduce((sum, t) => sum + Number(t.pnl ?? 0), 0);
   const winners = closedTrades.filter(t => Number(t.pnl) > 0).length;
   const winRate = closedTrades.length ? winners / closedTrades.length * 100 : 0;
   const openTrades = data.trades.filter(t => t.status === "open");
-  const recentTrades = useMemo(() => {
-    const rangeStart = getRangeStart(activeRange);
-    return data.trades
-      .filter(t => !rangeStart || new Date(t.ts) >= rangeStart)
+  const recentTrades = useMemo(() => (
+    [...data.trades]
       .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-      .slice(0, 5);
-  }, [data.trades, activeRange]);
-  const controlRangeStart = getRangeStart(activeRange);
-  const controlTrades = data.controls.filter(t => t.pnl !== null && (!controlRangeStart || new Date(t.ts) >= controlRangeStart));
+      .slice(0, 5)
+  ), [data.trades]);
+  const controlTrades = data.controls.filter(t => t.pnl !== null);
   const tradeById = new Map(closedTrades.map(t => [String(t.id), t]));
   const matchedControls = controlTrades.filter(c => c.trade_id != null && c.pnl != null && tradeById.has(String(c.trade_id)) && tradeById.get(String(c.trade_id))?.pnl != null && !tradeById.get(String(c.trade_id))?.exit_estimated);
   const matchedTradeIds = new Set(matchedControls.map(c => String(c.trade_id)));
@@ -101,7 +79,7 @@ function App() {
     const byDay = new Map<string, number>();
     for (const trade of ordered) {
       total += Number(trade.pnl ?? 0);
-      const day = new Date(trade.ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+      const day = new Date(trade.ts).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short" });
       byDay.set(day, total);
     }
     return [...byDay.entries()].map(([day, pnl]) => ({ day, pnl }));
@@ -129,17 +107,35 @@ function App() {
     <main className="main-panel">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span className="breadcrumb-parent">Workspace</span><span>/</span><strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill" aria-label="Paper trading environment"><span className="status-dot"/><span>Paper</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
       <div className="content-wrap">
-        <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
-        {demo && <div className="notice demo-notice"><Sparkles size={16}/><span><strong>Preview mode.</strong> Sample data is shown. Add your Supabase URL and publishable/anon key to load your real paper-trading records.</span><span className="notice-tag">DEMO DATA</span></div>}
-        {error && <div className="notice error-notice"><Database size={16}/><span><strong>Could not refresh trade data.</strong> {error} Live records are hidden rather than replaced with sample numbers.</span><button className="text-button" onClick={() => void refresh()}>Retry</button></div>}
-        
-        {!demo && !error && data.trades.length === 0 && <div className="notice error-notice"><ShieldCheck size={16}/><span><strong>The backend returned no paper-trade rows.</strong> Check the backend query and authentication. The React app does not connect to Supabase directly.</span></div>}
-        {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
-        {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
-        {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
-        {tab === "Backtests" && <ResearchPage runs={data.backtests}/>} 
-        {tab === "Risk monitor" && <RiskPage trades={closedTrades} openTrades={openTrades} totalPnl={totalPnl}/>}
-        <footer className="footer"><span><ShieldCheck size={14}/> Paper trading only · No broker orders</span><span>ORB Terminal <b>v0.1</b> <span className="footer-sep">·</span> Data source: {demo ? "sample preview" : "Supabase"}</span></footer>
+        <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh(activeRange)} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
+        {loading ? (
+          <div className="dashboard-loader" role="status" aria-live="polite">
+            <RefreshCw size={22} className="spin" />
+            <strong>Loading {activeRange} data</strong>
+            <span>Fetching the latest paper-trading records…</span>
+          </div>
+        ) : error ? (
+          <div className="notice error-notice">
+            <Database size={16} />
+            <span><strong>Could not load dashboard data.</strong> {error}</span>
+            <button className="text-button" onClick={() => void refresh(activeRange)}>Retry</button>
+          </div>
+        ) : (
+          <>
+            {data.trades.length === 0 && (
+              <div className="notice error-notice">
+                <ShieldCheck size={16} />
+                <span><strong>No paper trades found for {activeRange}.</strong> Try another range or refresh the data.</span>
+              </div>
+            )}
+            {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange}/>}
+            {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
+            {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
+            {tab === "Backtests" && <ResearchPage runs={data.backtests}/>}
+            {tab === "Risk monitor" && <RiskPage trades={closedTrades} openTrades={openTrades} totalPnl={totalPnl}/>}
+          </>
+        )}
+        <footer className="footer"><span><ShieldCheck size={14}/> Paper trading only · No broker orders</span><span>ORB Terminal <b>v0.1</b> <span className="footer-sep">·</span> Data source: Live API</span></footer>
       </div>
     </main>
   </div>;
@@ -149,9 +145,9 @@ function MetricCard({ label, value, change, positive, icon: Icon, sub }: { label
   return <div className="metric-card"><div className="metric-top"><span>{label}</span><div className="metric-icon"><Icon size={17}/></div></div><div className="metric-value">{value}</div><div className="metric-bottom">{change && <span className={positive ? "change positive" : "change negative"}>{positive ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>} {change}</span>}<span className="metric-sub">{sub}</span></div></div>;
 }
 
-function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, recentTrades, setTab, activeRange, setActiveRange }: { trades:PaperTrade[]; totalPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; recentTrades:PaperTrade[]; setTab:(t:Tab)=>void; activeRange:string; setActiveRange:(v:string)=>void }) {
+function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, recentTrades, setTab, activeRange, setActiveRange }: { trades:PaperTrade[]; totalPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; recentTrades:PaperTrade[]; setTab:(t:Tab)=>void; activeRange:DashboardRange; setActiveRange:(v:DashboardRange)=>void }) {
   return <>
-    <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{["1D","7D","30D","ALL"].map(x=><button key={x} onClick={()=>setActiveRange(x)} className={activeRange===x?"selected":""}>{x}</button>)}</div></div>
+    <div className="section-row"><div><h2>Performance overview</h2><p>Closed paper trades · estimated exits excluded</p></div><div className="range-switch">{(["1D","7D","30D","ALL"] as const).map(x=><button key={x} onClick={()=>setActiveRange(x)} className={activeRange===x?"selected":""}>{x}</button>)}</div></div>
     <div className="metric-grid">
       <MetricCard label="Net realized P&L" value={money(totalPnl)} change={totalPnl >= 0 ? "Positive" : "Negative"} positive={totalPnl >= 0} icon={Wallet} sub="After recorded trading costs"/>
       <MetricCard label="Win rate" value={`${winRate.toFixed(1)}%`} icon={TrendingUp} sub={`${trades.filter(t=>Number(t.pnl)>0).length} winning trades`}/>
@@ -163,7 +159,7 @@ function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkippe
       <section className="panel control-panel"><div className="panel-heading"><div><h3>AI control group</h3><p>AI strategy against no-AI baseline</p></div><div className="control-icon"><Bot size={18}/></div></div><div className="control-callout"><div className="callout-label">NO-AI CONTROL P&L</div><strong className={controlPnl>=0?"positive-text":"negative-text"}>{money(controlPnl)}</strong><span>{controls} completed control trades</span></div><div className="comparison-line"><div><span>AI strategy (matched)</span><strong className={matchedAiPnl>=0?"positive-text":"negative-text"}>{money(matchedAiPnl)}</strong></div><div><span>No-AI control (matched)</span><strong>{money(controlPnl)}</strong></div></div><div className="mini-bar"><span style={{width:`${Math.max(8,Math.min(100,Math.abs(matchedAiPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/><i style={{width:`${Math.max(8,Math.min(100,Math.abs(controlPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/></div><button className="panel-link" onClick={()=>setTab("AI vs no-AI")}>Explore AI impact <ArrowUpRight size={15}/></button><div className="research-note"><ShieldCheck size={15}/><span>Control results are hypothetical and do not place orders.</span></div></section>
     </div>
     <section className="panel table-panel"><div className="panel-heading"><div><h3>Recent trades</h3><p>Your latest simulated executions</p></div><button className="panel-link" onClick={()=>setTab("Trade journal")}>View journal <ArrowUpRight size={15}/></button></div><TradeTable trades={recentTrades}/></section>
-    <div className="bottom-grid"><section className="panel insight-panel"><div className="panel-heading"><div><h3>Strategy signals</h3><p>Quick read from your current sample</p></div><Sparkles size={17} className="muted-icon"/></div><div className="insight-row"><div className="insight-symbol"><Bot size={16}/></div><div className="insight-copy"><strong>AI decisions recorded</strong><span>{aiSkipped} skip decisions across visible trades</span></div><span className="insight-value">{trades.length ? `${Math.round(aiSkipped/Math.max(1,trades.length)*100)}%` : "—"}</span></div><div className="insight-row"><div className="insight-symbol"><Activity size={16}/></div><div className="insight-copy"><strong>Control group coverage</strong><span>Completed no-AI outcomes stored</span></div><span className="insight-value">{controls}</span></div></section><section className="panel quick-panel"><div className="panel-heading"><div><h3>Workspace status</h3><p>Data & execution safety</p></div><CheckCircle2 size={17} className="positive-text"/></div><div className="status-row"><span>Execution environment</span><strong><i className="tiny-dot green-dot"/> Paper only</strong></div><div className="status-row"><span>Dashboard data</span><strong>{isApiConfigured ? "Supabase configured" : "Preview mode"}</strong></div><div className="status-row"><span>Broker order routing</span><strong>Disabled</strong></div></section></div>
+    <div className="bottom-grid"><section className="panel insight-panel"><div className="panel-heading"><div><h3>Strategy signals</h3><p>Quick read from your current sample</p></div><Sparkles size={17} className="muted-icon"/></div><div className="insight-row"><div className="insight-symbol"><Bot size={16}/></div><div className="insight-copy"><strong>AI decisions recorded</strong><span>{aiSkipped} skip decisions across visible trades</span></div><span className="insight-value">{trades.length ? `${Math.round(aiSkipped/Math.max(1,trades.length)*100)}%` : "—"}</span></div><div className="insight-row"><div className="insight-symbol"><Activity size={16}/></div><div className="insight-copy"><strong>Control group coverage</strong><span>Completed no-AI outcomes stored</span></div><span className="insight-value">{controls}</span></div></section><section className="panel quick-panel"><div className="panel-heading"><div><h3>Workspace status</h3><p>Data & execution safety</p></div><CheckCircle2 size={17} className="positive-text"/></div><div className="status-row"><span>Execution environment</span><strong><i className="tiny-dot green-dot"/> Paper only</strong></div><div className="status-row"><span>Dashboard data</span><strong>Live API</strong></div><div className="status-row"><span>Broker order routing</span><strong>Disabled</strong></div></section></div>
   </>;
 }
 
