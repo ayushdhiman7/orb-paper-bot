@@ -187,3 +187,26 @@ button,select,input,a{touch-action:manipulation}
     white-space: nowrap;
   }
 }
+
+
+/* Compact loading state while a dashboard range is fetched from the API. */
+.dashboard-loader {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.dashboard-loader svg {
+  color: var(--accent);
+}
+.dashboard-loader strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.dashboard-loader span {
+  font-size: 11px;
+}
