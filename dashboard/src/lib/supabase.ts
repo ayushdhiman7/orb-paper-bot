@@ -1,6 +1,6 @@
 const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
-export const isApiConfigured = Boolean(apiBase);
+export type DashboardRange = "1D" | "7D" | "30D" | "ALL";
 
 export type PaperTrade = {
   id: number | string; ts: string; symbol: string; side: string; qty: number;
@@ -21,9 +21,9 @@ export type BacktestRun = {
 };
 export type DashboardData = { trades: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[] };
 
-export async function loadDashboardData(): Promise<DashboardData> {
+export async function loadDashboardData(range: DashboardRange): Promise<DashboardData> {
   if (!apiBase) throw new Error("Backend API is not configured. Set VITE_API_BASE_URL.");
-  const response = await fetch(`${apiBase}/api/dashboard`, {
+  const response = await fetch(`${apiBase}/api/dashboard?range=${range}`, {
     headers: { Accept: "application/json" },
     credentials: "include",
   });
