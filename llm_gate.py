@@ -1,21 +1,37 @@
 """
 Optional AI second opinion on each breakout, using Google's Gemini API.
 
-Fails safe: if there is no key, the network fails, or the reply is unreadable, review() returns None and the
-bot carries on exactly as before. The key is read from the GEMINI_API_KEY environment variable only
-(a GitHub Actions secret). Never put it in a file.
+Every actual HTTP attempt reserves a durable Gemini quota slot immediately before
+network I/O. Missing credentials, quota exhaustion, corrupt quota state, or network
+failure fail closed and return None; existing paper strategy behaviour is unchanged.
 """
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from gemini_quota import PersistentGeminiQuota, QuotaStateError
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-# Model names change often. GEMINI_MODEL overrides; otherwise try these in order and remember the one that works.
 DEFAULT_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
 TIMEOUT = 20
+IST = ZoneInfo("Asia/Kolkata")
 _working = None
+_quota = None
+
+
+def _get_quota():
+    global _quota
+    if _quota is None:
+        _quota = PersistentGeminiQuota(
+            daily_limit=int(os.getenv("GEMINI_MAX_REQUESTS_PER_DAY", "100")),
+            per_minute_limit=int(os.getenv("GEMINI_MAX_REQUESTS_PER_MINUTE", "5")),
+        )
+    return _quota
+
 
 PROMPT = """You are a cautious intraday-trading risk reviewer for a PAPER-trading bot on Indian (NSE) stocks.
 The bot wants to enter the trade below after an opening-range breakout. Decide whether this particular breakout
@@ -25,7 +41,6 @@ Use only the data given. Do not invent news or facts. Reply with JSON only, in t
 
 Trade data:
 {ctx}"""
-
 
 EXIT_PROMPT = """You are a cautious intraday-trading risk manager for a PAPER-trading bot on Indian (NSE) stocks.
 The bot already holds the position below. Every few minutes you decide: "hold" (keep it open, the fixed stop
@@ -39,6 +54,7 @@ Reply with JSON only, in this exact shape:
 
 Position data:
 {ctx}"""
+
 
 def _models():
     env = os.getenv("GEMINI_MODEL", "").strip()
@@ -58,13 +74,14 @@ def _post(model, body, key):
 
 
 def _parse(text, allowed=("take", "skip")):
-    """Pull {"decision","reason"} out of the model's text. Returns None if unreadable."""
     if not text:
         return None
     m = re.search(r"\{.*\}", text, re.S)
     try:
         data = json.loads(m.group(0) if m else text)
     except Exception:
+        return None
+    if not isinstance(data, dict):
         return None
     decision = str(data.get("decision", "")).strip().lower()
     if decision not in allowed:
@@ -73,19 +90,32 @@ def _parse(text, allowed=("take", "skip")):
 
 
 def _ask(prompt, allowed):
-    """Send one prompt, try model names in turn. Returns {"decision","reason","model"} or None. Never raises."""
+    """Send a Gemini request. Every HTTP attempt consumes one reserved quota slot."""
     global _working
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
+        return None
+    try:
+        quota = _get_quota()
+    except Exception as exc:
+        print(f"[warn] Gemini request blocked by quota configuration ({type(exc).__name__})")
         return None
     for model in _models():
         body = {"contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
         for attempt in (0, 1):
             try:
+                try:
+                    reserved, reason = quota.reserve(datetime.now(IST))
+                except (QuotaStateError, OSError, ValueError) as exc:
+                    print(f"[warn] Gemini request blocked by quota state ({type(exc).__name__})")
+                    return None
+                if not reserved:
+                    print(f"[warn] Gemini request blocked ({reason})")
+                    return None
                 resp = _post(model, body, key)
-                text = resp["candidates"][0]["content"]["parts"][0]["text"]
-                out = _parse(text, allowed)
+                response_text = resp["candidates"][0]["content"]["parts"][0]["text"]
+                out = _parse(response_text, allowed)
                 if out:
                     _working = model
                     out["model"] = model
@@ -94,10 +124,10 @@ def _ask(prompt, allowed):
                 return None
             except urllib.error.HTTPError as e:
                 if e.code == 400 and attempt == 0 and "generationConfig" in body:
-                    body = {"contents": body["contents"]}   # some models reject JSON mode: retry plain
+                    body = {"contents": body["contents"]}
                     continue
                 print(f"[warn] AI call failed on {model}: HTTP {e.code}")
-                break   # 404 (unknown model), 403 (key problem), 429 ...: try the next model name
+                break
             except Exception as e:
                 print(f"[warn] AI call failed on {model}: {type(e).__name__}")
                 break
