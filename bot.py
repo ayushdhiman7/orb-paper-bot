@@ -603,6 +603,7 @@ def restore_state(now):
 def run():
     global FEED
     assert_safe_startup()
+    webhook.start()  # Drain events persisted by a previous process before today's session.
     state = restore_state(datetime.now(IST))
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
     notify.send(f"Paper bot started | capital Rs {CAPITAL:.0f} | data source {DATA_SOURCE}", once_key="started")
