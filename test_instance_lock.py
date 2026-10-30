@@ -2,7 +2,6 @@
 import os
 import subprocess
 import sys
-import time
 
 import bot
 
@@ -35,7 +34,8 @@ def test_lock_blocks_second_instance_and_releases_after_owner_closes(tmp_path, m
 
 
 
-def test_lock_excludes_a_real_second_process_and_releases_on_exit(tmp_path):
+def test_lock_excludes_a_real_second_process_and_releases_on_exit(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot, "_INSTANCE_LOCK_FD", None)
     lock_path = tmp_path / "orb-subprocess.lock"
     env = os.environ.copy()
     env["ORB_LOCK_FILE"] = str(lock_path)
@@ -54,15 +54,8 @@ def test_lock_excludes_a_real_second_process_and_releases_on_exit(tmp_path):
     )
     try:
         assert child.stdout.readline().strip() == "LOCKED"
-        previous = os.environ.get("ORB_LOCK_FILE")
-        os.environ["ORB_LOCK_FILE"] = str(lock_path)
-        try:
-            assert bot.acquire_instance_lock() is False
-        finally:
-            if previous is None:
-                os.environ.pop("ORB_LOCK_FILE", None)
-            else:
-                os.environ["ORB_LOCK_FILE"] = previous
+        monkeypatch.setenv("ORB_LOCK_FILE", str(lock_path))
+        assert bot.acquire_instance_lock() is False
     finally:
         child.terminate()
         child.wait(timeout=5)
