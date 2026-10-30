@@ -204,7 +204,7 @@ def test_sse_reconnect_resumes_from_last_event_id(monkeypatch):
     }]
     client = FakeStreamClient(rows)
     monkeypatch.setattr(dashboard_api, "create_client", lambda *_args: client)
-    request = FakeStreamRequest({"last-event-id": "4"})
+    request = FakeStreamRequest({"Last-Event-ID": "4"})
 
     async def collect():
         response = await dashboard_api.stream_events(request, after=0)
