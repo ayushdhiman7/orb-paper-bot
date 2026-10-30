@@ -258,3 +258,21 @@ def test_stale_or_invalid_yahoo_price_is_rejected(monkeypatch):
     assert bot.last_price("X.NS") is None
     monkeypatch.setattr(bot, "fetch_candles", lambda s: _Df(100.0, now - timedelta(minutes=16)))
     assert bot.last_price("X.NS") == 100.0
+
+
+
+def test_supabase_client_is_initialized_lazily_before_startup_check(monkeypatch):
+    class StartupReached(Exception):
+        pass
+
+    fake_client = object()
+    monkeypatch.setattr(bot, "SB", None)
+    monkeypatch.setattr(bot, "get_supabase", lambda: fake_client)
+
+    def startup_check():
+        assert bot.SB is fake_client
+        raise StartupReached
+
+    monkeypatch.setattr(bot, "assert_safe_startup", startup_check)
+    with pytest.raises(StartupReached):
+        bot.run()
