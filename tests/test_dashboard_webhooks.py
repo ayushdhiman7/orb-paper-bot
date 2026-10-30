@@ -116,3 +116,102 @@ def test_ingest_returns_service_unavailable_without_database_config(monkeypatch)
     with pytest.raises(HTTPException) as error:
         asyncio.run(dashboard_api.ingest_event(request))
     assert error.value.status_code == 503
+
+
+
+class FakeStreamQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.selected = None
+        self.filters = []
+
+    def select(self, columns):
+        self.selected = columns
+        return self
+
+    def order(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def gt(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def execute(self):
+        if self.selected == "id":
+            return type("Response", (), {"data": [{"id": 4}]})()
+        return type("Response", (), {"data": self.rows})()
+
+
+class FakeStreamClient:
+    def __init__(self, rows):
+        self.query = FakeStreamQuery(rows)
+
+    def table(self, name):
+        assert name == "dashboard_events"
+        return self.query
+
+
+class FakeStreamRequest:
+    def __init__(self, headers=None):
+        self.headers = headers or {}
+        self.disconnect_checks = 0
+
+    async def is_disconnected(self):
+        self.disconnect_checks += 1
+        return self.disconnect_checks > 1
+
+
+def test_sse_new_connection_sends_ready_cursor_then_new_events(monkeypatch):
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    rows = [{
+        "id": 5, "event_id": "evt-5", "event_type": "trade.opened",
+        "occurred_at": "2026-10-30T09:30:00+05:30", "source": "orb-paper-bot",
+        "data": {"symbol": "RELIANCE.NS"}, "received_at": "2026-10-30T04:00:00+00:00",
+    }]
+    clients = []
+
+    def create_stream_client(*_args):
+        client = FakeStreamClient(rows)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(dashboard_api, "create_client", create_stream_client)
+    request = FakeStreamRequest()
+
+    async def collect():
+        response = await dashboard_api.stream_events(request, after=0)
+        return [chunk async for chunk in response.body_iterator]
+
+    chunks = asyncio.run(collect())
+    body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
+    assert 'event: ready\ndata: {"cursor":4}' in body
+    assert 'id: 5\nevent: trade.opened\ndata:' in body
+    assert '"event_id":"evt-5"' in body
+    assert clients[-1].query.filters == [("id", 4)]
+
+
+def test_sse_reconnect_resumes_from_last_event_id(monkeypatch):
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    rows = [{
+        "id": 5, "event_id": "evt-5", "event_type": "trade.closed",
+        "occurred_at": "2026-10-30T10:00:00+05:30", "source": "orb-paper-bot",
+        "data": {"symbol": "RELIANCE.NS"}, "received_at": "2026-10-30T04:30:00+00:00",
+    }]
+    client = FakeStreamClient(rows)
+    monkeypatch.setattr(dashboard_api, "create_client", lambda *_args: client)
+    request = FakeStreamRequest({"last-event-id": "4"})
+
+    async def collect():
+        response = await dashboard_api.stream_events(request, after=0)
+        return [chunk async for chunk in response.body_iterator]
+
+    chunks = asyncio.run(collect())
+    body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
+    assert "event: ready" not in body
+    assert "id: 5\\nevent: trade.closed" in body
+    assert client.query.filters == [("id", 4)]
