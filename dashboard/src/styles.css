@@ -5,3 +5,52 @@
 /* Historical backtest summaries stay readable without widening the dashboard. */
 .backtest-summary{white-space:pre-wrap;overflow-wrap:anywhere;max-height:560px;overflow:auto;margin:0;padding:18px;background:#10131b;border:1px solid #282d39;border-radius:12px;color:#cbd0dc;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
 .backtest-detail{min-width:0}
+
+
+/* Dashboard layout polish: prevent desktop overflow and keep dense panels readable. */
+html, body, #root { width: 100%; max-width: 100%; }
+body { overflow-x: hidden; }
+.app-shell, .main-panel { width: 100%; min-width: 0; }
+.main-panel { max-width: calc(100% - 252px); }
+.content-wrap { width: 100%; min-width: 0; }
+.main-grid { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.main-grid > *, .bottom-grid > *, .metric-grid > *, .panel, .backtest-detail { min-width: 0; }
+.panel-heading { min-width: 0; }
+.panel-heading > div { min-width: 0; }
+.panel-heading h3, .panel-heading p { overflow-wrap: anywhere; }
+.page-heading { min-width: 0; }
+.page-heading > div:first-child { min-width: 0; }
+.heading-actions { flex-wrap: wrap; justify-content: flex-end; }
+.notice { min-width: 0; }
+.notice > span { min-width: 0; overflow-wrap: anywhere; }
+.status-row { min-width: 0; }
+.status-row > span { min-width: 0; }
+.status-row strong { max-width: 58%; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.insight-row { min-width: 0; }
+.insight-copy { min-width: 0; }
+.insight-value { flex-shrink: 0; }
+.backtest-summary { width: 100%; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+.table-scroll { max-width: 100%; }
+.metric-value { min-width: 0; }
+.compare-rows { min-width: 0; }
+
+@media (max-width: 1200px) {
+  .main-panel { max-width: calc(100% - 220px); }
+  .main-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  .content-wrap { padding-left: 22px; padding-right: 22px; }
+}
+@media (max-width: 900px) {
+  .main-panel { max-width: 100%; }
+  .main-grid { grid-template-columns: minmax(0, 1fr); }
+  .heading-actions { justify-content: flex-start; }
+}
+@media (max-width: 600px) {
+  .main-grid, .bottom-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-heading { align-items: flex-start; }
+  .heading-actions { width: 100%; }
+  .heading-actions > button { flex: 1 1 auto; }
+  .status-row { align-items: flex-start; }
+  .status-row strong { max-width: 56%; }
+  .notice { padding: 10px 11px; }
+  .backtest-summary { max-height: 440px; padding: 13px; font-size: 11px; }
+}
