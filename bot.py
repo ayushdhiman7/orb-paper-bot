@@ -18,6 +18,7 @@ import yfinance as yf
 
 import llm_gate
 import notify
+import webhook
 from shadow import NoAIControlLedger, ShadowLedger
 from angel_feed import AngelFeed
 
@@ -375,6 +376,11 @@ def try_entry(state: State, symbol: str, now: datetime):
     state.last_prices[symbol] = price
     print(f"[ENTRY] {side} {qty} {symbol} @ {entry_price:.2f} SL {stop:.2f} TP {target:.2f} (fee {entry_fee:.2f})")
     notify.send(f"ENTRY {side} {qty} {symbol} @ {entry_price:.2f} | SL {stop:.2f} TP {target:.2f}")
+    webhook.emit("trade.opened", now, {
+        "trade_id": pos.row_id, "symbol": symbol, "side": side, "qty": qty,
+        "entry": round(entry_price, 2), "stop": round(stop, 2), "target": round(target, 2),
+        "status": "open", "mode": "paper",
+    })
 
 
 def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
@@ -405,6 +411,11 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     log_shadow(LEDGER.close(symbol, price, round(trade_net_pnl, 2), now))
     # Do not close the no-AI control here: it must survive AI exits and other early real exits.
     notify.send(f"EXIT {symbol} @ {exit_fill:.2f} ({reason}) net P&L {trade_net_pnl:+.2f}")
+    webhook.emit("trade.closed", now, {
+        "trade_id": pos.row_id, "symbol": symbol, "side": pos.side, "qty": pos.qty,
+        "entry": round(pos.entry, 2), "exit": round(exit_fill, 2),
+        "pnl": round(trade_net_pnl, 2), "reason": reason, "status": "closed", "mode": "paper",
+    })
     return True
 
 
@@ -592,6 +603,7 @@ def restore_state(now):
 def run():
     global FEED
     assert_safe_startup()
+    webhook.start()  # Drain events persisted by a previous process before today's session.
     state = restore_state(datetime.now(IST))
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
     notify.send(f"Paper bot started | capital Rs {CAPITAL:.0f} | data source {DATA_SOURCE}", once_key="started")

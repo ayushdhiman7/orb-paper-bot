@@ -51,6 +51,33 @@ function App() {
     };
   }, [refresh, activeRange]);
 
+  // Server-Sent Events are notifications only; dashboard values always come from the API.
+  useEffect(() => {
+    const source = new EventSource("/api/events/stream");
+    let connected = false;
+    source.onopen = () => { connected = true; };
+    source.onerror = () => { connected = false; };
+    // Refresh after the server establishes its initial event cursor. This closes
+    // the gap between the page's first API request and opening the event stream.
+    const onReady = () => { void refresh(activeRange); };
+    const onTradeEvent = () => { void refresh(activeRange); };
+    source.addEventListener("ready", onReady);
+    source.addEventListener("trade.opened", onTradeEvent);
+    source.addEventListener("trade.closed", onTradeEvent);
+    source.addEventListener("bot.status_changed", onTradeEvent);
+    source.addEventListener("risk.alert", onTradeEvent);
+
+    // Fallback refresh only while the event stream is disconnected.
+    const fallback = window.setInterval(() => {
+      if (!connected) void refresh(activeRange);
+    }, 30000);
+
+    return () => {
+      window.clearInterval(fallback);
+      source.close();
+    };
+  }, [refresh, activeRange]);
+
   const closedTrades = data.trades.filter(
     t => t.status !== "open" && t.pnl !== null && !t.exit_estimated,
   );

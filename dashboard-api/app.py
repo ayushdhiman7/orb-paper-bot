@@ -1,4 +1,9 @@
+import asyncio
+import hmac
+import json
+import logging
 import os
+import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -6,9 +11,11 @@ from zoneinfo import ZoneInfo
 
 import pandas_market_calendars as market_calendars
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
+from starlette.concurrency import run_in_threadpool
 
 # Load the existing bot credentials without exposing them.
 load_dotenv(Path.home() / "orb-paper-bot" / ".env")
@@ -19,6 +26,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
 UTC = timezone.utc
 PAGE_SIZE = 1000
+WEBHOOK_MAX_SKEW_SECONDS = 300
+EVENT_BATCH_SIZE = 100
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ORB Dashboard API")
 
@@ -85,6 +95,180 @@ def fetch_all_rows(client, table_name: str, timestamp_column: str, start_utc: st
 
     return rows
 
+
+def _webhook_secret() -> str:
+    return os.getenv("DASHBOARD_WEBHOOK_SECRET", "").strip()
+
+
+def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
+    secret = _webhook_secret()
+    if not secret or not timestamp or not signature.startswith("sha256="):
+        return False
+    try:
+        sent_at = int(timestamp)
+        timestamp_bytes = timestamp.encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return False
+    if abs(time_module.time() - sent_at) > WEBHOOK_MAX_SKEW_SECONDS:
+        return False
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        timestamp_bytes + b"." + raw_body,
+        digestmod="sha256",
+    ).hexdigest()
+    supplied = signature[len("sha256="):]
+    return hmac.compare_digest(expected, supplied)
+
+
+def _persist_dashboard_event(payload: dict) -> None:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    client.table("dashboard_events").upsert(
+        {
+            "event_id": payload["event_id"],
+            "event_type": payload["event_type"],
+            "occurred_at": payload["occurred_at"],
+            "source": str(payload.get("source", "orb-paper-bot"))[:80],
+            "data": payload["data"],
+        },
+        on_conflict="event_id",
+        ignore_duplicates=True,
+    ).execute()
+
+
+@app.post("/api/events")
+async def ingest_event(request: Request):
+    raw_body = await request.body()
+    timestamp = request.headers.get("X-ORB-Timestamp", "")
+    signature = request.headers.get("X-ORB-Signature", "")
+    if not _verify_webhook(raw_body, timestamp, signature):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Invalid event payload")
+
+    event_id = payload.get("event_id")
+    event_type = payload.get("event_type")
+    occurred_at = payload.get("occurred_at")
+    data = payload.get("data")
+    if (
+        not isinstance(event_id, str) or not event_id or len(event_id) > 128
+        or not isinstance(event_type, str)
+        or event_type not in {"trade.opened", "trade.closed", "bot.status_changed", "risk.alert"}
+        or not isinstance(occurred_at, str)
+        or not isinstance(data, dict)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid event payload")
+    try:
+        parsed_occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        if parsed_occurred_at.tzinfo is None:
+            raise ValueError("Event timestamp must include a timezone")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid event timestamp")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+
+    try:
+        await run_in_threadpool(_persist_dashboard_event, payload)
+        return {"status": "accepted", "event_id": event_id}
+    except Exception:
+        logger.exception("Unable to persist dashboard webhook event_id=%s", event_id)
+        raise HTTPException(status_code=502, detail="Unable to persist dashboard event")
+
+
+def _latest_dashboard_event_id() -> int:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    latest = (
+        client.table("dashboard_events")
+        .select("id")
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    return int(latest[0]["id"]) if latest else 0
+
+
+def _fetch_dashboard_events_after(cursor: int) -> list[dict]:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return (
+        client.table("dashboard_events")
+        .select("id,event_id,event_type,occurred_at,source,data,received_at")
+        .gt("id", cursor)
+        .order("id")
+        .limit(EVENT_BATCH_SIZE)
+        .execute()
+    ).data or []
+
+
+@app.get("/api/events/stream")
+async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+    last_event_id = request.headers.get("Last-Event-ID", "").strip()
+    if last_event_id:
+        try:
+            after = max(after, int(last_event_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Last-Event-ID")
+
+    async def generate():
+        cursor = after
+        if cursor == 0:
+            try:
+                cursor = await run_in_threadpool(_latest_dashboard_event_id)
+            except Exception:
+                logger.exception("Unable to establish initial dashboard SSE cursor")
+                # Continue from zero so events are not silently skipped.
+                cursor = 0
+            # The browser refreshes its authoritative snapshot at this boundary.
+            ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
+            yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
+
+        last_keepalive = time_module.monotonic()
+        poll_backoff = 2
+        while not await request.is_disconnected():
+            try:
+                rows = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
+                poll_backoff = 2
+                for row in rows:
+                    cursor = max(cursor, int(row["id"]))
+                    event_name = row["event_type"]
+                    body = json.dumps(
+                        {
+                            "event_id": row["event_id"],
+                            "event_type": event_name,
+                            "occurred_at": row["occurred_at"],
+                            "source": row["source"],
+                            "data": row["data"],
+                        },
+                        separators=(",", ":"),
+                    )
+                    yield f"id: {cursor}\nevent: {event_name}\ndata: {body}\n\n"
+                if rows:
+                    continue
+            except Exception:
+                logger.exception("Dashboard SSE poll failed; retrying in %s seconds", poll_backoff)
+                await asyncio.sleep(poll_backoff)
+                poll_backoff = min(30, poll_backoff * 2)
+                continue
+
+            if time_module.monotonic() - last_keepalive >= 15:
+                yield ": keep-alive\n\n"
+                last_keepalive = time_module.monotonic()
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @app.get("/health")
 def health():
