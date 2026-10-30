@@ -224,7 +224,8 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 # Continue from zero so events are not silently skipped.
                 cursor = 0
             # The browser refreshes its authoritative snapshot at this boundary.
-            yield f"id: {cursor}\\nevent: ready\\ndata: {{\\"cursor\\":{cursor}}}\\n\\n"
+            ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
+            yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
 
         last_keepalive = time_module.monotonic()
         poll_backoff = 2
@@ -245,7 +246,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                         },
                         separators=(",", ":"),
                     )
-                    yield f"id: {cursor}\\nevent: {event_name}\\ndata: {body}\\n\\n"
+                    yield f"id: {cursor}\nevent: {event_name}\ndata: {body}\n\n"
                 if rows:
                     continue
             except Exception:
@@ -255,7 +256,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 continue
 
             if time_module.monotonic() - last_keepalive >= 15:
-                yield ": keep-alive\\n\\n"
+                yield ": keep-alive\n\n"
                 last_keepalive = time_module.monotonic()
             await asyncio.sleep(2)
 
