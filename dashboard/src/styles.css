@@ -220,3 +220,25 @@ button,select,input,a{touch-action:manipulation}
   font-weight: 550;
   white-space: nowrap;
 }
+
+
+/* Account-level P&L summary: realized period result + current open-position marks. */
+.pnl-summary-panel{
+  display:flex;align-items:center;justify-content:space-between;gap:24px;
+  padding:19px 21px;margin:0 0 14px;border:1px solid #343044;border-radius:12px;
+  background:radial-gradient(ellipse at 90% 0%,#292342 0%,#171722 52%,#12151d 100%);
+}
+.pnl-summary-copy{display:grid;gap:6px;min-width:0}
+.pnl-summary-label{font-size:9px;letter-spacing:.12em;font-weight:800;color:#b7acd9}
+.pnl-summary-copy>strong{font-size:clamp(26px,3vw,34px);letter-spacing:-.055em;font-variant-numeric:tabular-nums}
+.pnl-summary-copy>small{font-size:10px;color:#9298a8;line-height:1.5}
+.pnl-summary-breakdown{display:flex;gap:28px;flex-shrink:0}
+.pnl-summary-breakdown>div{display:grid;gap:7px}
+.pnl-summary-breakdown span{font-size:9px;color:#9298a8}
+.pnl-summary-breakdown strong{font-size:16px;font-variant-numeric:tabular-nums}
+.open-positions-panel .panel-heading{margin-bottom:14px}
+@media(max-width:700px){
+  .pnl-summary-panel{align-items:flex-start;flex-direction:column;gap:16px;padding:16px}
+  .pnl-summary-breakdown{width:100%;justify-content:space-between;gap:12px}
+  .pnl-summary-breakdown strong{font-size:14px}
+}
