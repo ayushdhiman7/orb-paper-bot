@@ -143,7 +143,7 @@ def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
 
 def _persist_dashboard_event(payload: dict) -> dict | None:
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    result = client.table("dashboard_events").upsert(
+    client.table("dashboard_events").upsert(
         {
             "event_id": payload["event_id"],
             "event_type": payload["event_type"],
@@ -153,7 +153,16 @@ def _persist_dashboard_event(payload: dict) -> dict | None:
         },
         on_conflict="event_id",
         ignore_duplicates=True,
-    ).select("id,event_id,event_type,occurred_at,source,data").execute()
+    ).execute()
+    # Read back even on duplicate delivery: if the first request persisted but
+    # crashed before broadcasting, the retry must still wake connected clients.
+    result = (
+        client.table("dashboard_events")
+        .select("id,event_id,event_type,occurred_at,source,data")
+        .eq("event_id", payload["event_id"])
+        .limit(1)
+        .execute()
+    )
     return (result.data or [None])[0]
 
 
