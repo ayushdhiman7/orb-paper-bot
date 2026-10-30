@@ -128,6 +128,8 @@ async def ingest_event(request: Request):
         payload = json.loads(raw_body)
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Invalid event payload")
 
     event_id = payload.get("event_id")
     event_type = payload.get("event_type")
@@ -135,6 +137,7 @@ async def ingest_event(request: Request):
     data = payload.get("data")
     if (
         not isinstance(event_id, str) or not event_id or len(event_id) > 128
+        or not isinstance(event_type, str)
         or event_type not in {"trade.opened", "trade.closed", "bot.status_changed", "risk.alert"}
         or not isinstance(occurred_at, str)
         or not isinstance(data, dict)
@@ -165,9 +168,30 @@ async def ingest_event(request: Request):
 async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+    last_event_id = request.headers.get("Last-Event-ID", "").strip()
+    if last_event_id:
+        try:
+            after = max(after, int(last_event_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Last-Event-ID")
 
     async def generate():
         cursor = after
+        if cursor == 0:
+            # New browser sessions start at the current head; reconnects resume from Last-Event-ID.
+            try:
+                client = create_client(SUPABASE_URL, SUPABASE_KEY)
+                latest = (
+                    client.table("dashboard_events")
+                    .select("id")
+                    .order("id", desc=True)
+                    .limit(1)
+                    .execute()
+                ).data or []
+                if latest:
+                    cursor = int(latest[0]["id"])
+            except Exception:
+                pass
         last_keepalive = time.monotonic()
         while not await request.is_disconnected():
             try:
