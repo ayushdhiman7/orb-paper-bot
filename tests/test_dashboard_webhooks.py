@@ -45,12 +45,31 @@ class FakeQuery:
     def __init__(self):
         self.values = None
         self.options = None
+        self.selected = None
+        self.event_id = None
+        self.max_rows = None
 
     def upsert(self, values, **options):
         self.values, self.options = values, options
         return self
 
+    def select(self, columns):
+        self.selected = columns
+        return self
+
+    def eq(self, column, value):
+        assert column == "event_id"
+        self.event_id = value
+        return self
+
+    def limit(self, count):
+        self.max_rows = count
+        return self
+
     def execute(self):
+        if self.selected:
+            row = {"id": 7, **(self.values or {})}
+            return type("Response", (), {"data": [row] if row["event_id"] == self.event_id else []})()
         return type("Response", (), {"data": []})()
 
 
@@ -86,9 +105,11 @@ def test_ingest_persists_valid_event_and_uses_idempotent_upsert(monkeypatch):
     }
     request, _, _, _ = make_request(payload)
     result = asyncio.run(dashboard_api.ingest_event(request))
-    assert result == {"status": "accepted", "event_id": "evt-unique"}
+    assert result == {"status": "accepted", "event_id": "evt-unique", "duplicate": False}
     assert client.query.values["event_id"] == "evt-unique"
     assert client.query.options == {"on_conflict": "event_id", "ignore_duplicates": True}
+    assert client.query.selected == "id,event_id,event_type,occurred_at,source,data"
+    assert client.query.event_id == "evt-unique"
 
 
 def test_ingest_rejects_timezone_naive_timestamp(monkeypatch):
