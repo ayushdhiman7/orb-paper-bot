@@ -149,3 +149,41 @@ button,select,input,a{touch-action:manipulation}
 @media (display-mode:standalone){
   body{overscroll-behavior-y:contain}
 }
+
+
+/* Mobile header: keep menu, current section and paper status on one aligned row. */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.topbar-left .breadcrumb {
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .topbar-left {
+    flex: 1 1 auto;
+    gap: 8px;
+  }
+  .breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10px;
+  }
+  .breadcrumb-parent,
+  .breadcrumb > span {
+    display: none;
+  }
+  .topbar-actions {
+    flex: 0 0 auto;
+    gap: 5px;
+  }
+  .market-pill {
+    font-size: 9px;
+    padding: 7px 8px;
+    white-space: nowrap;
+  }
+}
