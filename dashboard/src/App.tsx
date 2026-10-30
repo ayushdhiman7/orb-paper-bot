@@ -57,7 +57,11 @@ function App() {
     let connected = false;
     source.onopen = () => { connected = true; };
     source.onerror = () => { connected = false; };
+    // Refresh after the server establishes its initial event cursor. This closes
+    // the gap between the page's first API request and opening the event stream.
+    const onReady = () => { void refresh(activeRange); };
     const onTradeEvent = () => { void refresh(activeRange); };
+    source.addEventListener("ready", onReady);
     source.addEventListener("trade.opened", onTradeEvent);
     source.addEventListener("trade.closed", onTradeEvent);
     source.addEventListener("bot.status_changed", onTradeEvent);
