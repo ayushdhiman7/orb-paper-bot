@@ -46,6 +46,9 @@ function App() {
 
   useEffect(() => {
     void refresh(activeRange);
+    return () => {
+      requestId.current += 1;
+    };
   }, [refresh, activeRange]);
 
   const closedTrades = data.trades.filter(
