@@ -213,5 +213,5 @@ def test_sse_reconnect_resumes_from_last_event_id(monkeypatch):
     chunks = asyncio.run(collect())
     body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
     assert "event: ready" not in body
-    assert "id: 5\\nevent: trade.closed" in body
+    assert "id: 5\nevent: trade.closed" in body
     assert client.query.filters == [("id", 4)]
