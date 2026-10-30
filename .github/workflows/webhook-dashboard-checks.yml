@@ -14,8 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install --upgrade pip pytest
-      - run: python -m pytest -q tests/test_webhook.py
+      - run: python -m pip install --upgrade pip pytest fastapi python-dotenv supabase pandas-market-calendars
+      - run: python -m pytest -q tests/test_webhook.py tests/test_dashboard_webhooks.py
       - run: python -m compileall -q dashboard-api webhook.py
 
   dashboard:
