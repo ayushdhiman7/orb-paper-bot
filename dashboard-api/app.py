@@ -153,7 +153,7 @@ def _persist_dashboard_event(payload: dict) -> dict | None:
         },
         on_conflict="event_id",
         ignore_duplicates=True,
-    ).execute()
+    ).select("id,event_id,event_type,occurred_at,source,data").execute()
     return (result.data or [None])[0]
 
 
@@ -239,6 +239,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
     last_event_id = request.headers.get("Last-Event-ID", "").strip()
+    has_last_event_id = bool(last_event_id)
     if last_event_id:
         try:
             after = max(after, int(last_event_id))
@@ -252,10 +253,10 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
         # during setup are either replayed from the DB or buffered in this queue.
         _event_subscribers.add(subscriber)
         try:
-            if cursor == 0:
+            if not has_last_event_id:
                 cursor = await run_in_threadpool(_latest_dashboard_event_id)
                 ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
-                yield f"id: {cursor}\\nevent: ready\\ndata: {ready_body}\\n\\n"
+                yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
             else:
                 missed = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
                 for row in missed:
@@ -267,16 +268,16 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                         "source": row["source"],
                         "data": row["data"],
                     }, separators=(",", ":"))
-                    yield f"id: {cursor}\\nevent: {row['event_type']}\\ndata: {body}\\n\\n"
+                    yield f"id: {cursor}\nevent: {row['event_type']}\ndata: {body}\n\n"
 
             while not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(subscriber.get(), timeout=15)
                 except asyncio.TimeoutError:
-                    yield ": keep-alive\\n\\n"
+                    yield ": keep-alive\n\n"
                     continue
                 if event.get("_overflow"):
-                    yield "event: resync\\ndata: {}\\n\\n"
+                    yield "event: resync\ndata: {}\n\n"
                     break
                 event_id = int(event["id"])
                 if event_id <= cursor:
@@ -289,7 +290,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                     "source": event["source"],
                     "data": event["data"],
                 }, separators=(",", ":"))
-                yield f"id: {cursor}\\nevent: {event['event_type']}\\ndata: {body}\\n\\n"
+                yield f"id: {cursor}\nevent: {event['event_type']}\ndata: {body}\n\n"
         except Exception:
             logger.exception("Dashboard SSE stream failed")
         finally:
