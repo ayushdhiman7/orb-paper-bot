@@ -105,6 +105,15 @@ def dashboard(range: Literal["1D", "7D", "30D", "ALL"] = Query(default="7D")):
 
         trades = fetch_all_rows(client, "paper_trades", "ts", start_utc, end_utc)
         controls = fetch_all_rows(client, "shadow_trades", "ts", start_utc, end_utc)
+        # Active positions are account state, not historical events: return all of them
+        # independently of the selected journal/performance date range.
+        open_positions = (
+            client.table("paper_trades")
+            .select("*")
+            .eq("status", "open")
+            .order("ts", desc=True)
+            .execute()
+        ).data or []
 
         # Backtests are historical research, not market-session trade records.
         backtests = (
@@ -119,6 +128,7 @@ def dashboard(range: Literal["1D", "7D", "30D", "ALL"] = Query(default="7D")):
             "range": range,
             "timezone": "Asia/Kolkata",
             "trades": trades,
+            "open_positions": open_positions,
             "controls": controls,
             "backtests": backtests,
         }
