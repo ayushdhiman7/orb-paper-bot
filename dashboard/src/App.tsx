@@ -166,18 +166,29 @@ function Overview({ trades, totalPnl, matchedAiPnl, winRate, openCount, aiSkippe
   </>;
 }
 
+function getTradePnl(t: PaperTrade): { value: number | null; kind: "realized" | "unrealized" | "estimated" | "unavailable" } {
+  if (t.status === "open") {
+    if (t.last_price == null) return { value: null, kind: "unavailable" };
+    const direction = t.side === "BUY" ? 1 : -1;
+    return { value: (Number(t.last_price) - Number(t.entry)) * Number(t.qty) * direction, kind: "unrealized" };
+  }
+  if (t.pnl == null) return { value: null, kind: "unavailable" };
+  if (t.exit_estimated) return { value: Number(t.pnl), kind: "estimated" };
+  return { value: Number(t.pnl), kind: "realized" };
+}
+
 function TradeTable({ trades }: { trades:PaperTrade[] }) {
   if (!trades.length) return <div className="table-empty">No matching trades found.</div>;
   return <><div className="trade-cards">{trades.map(t=>{
     const name=t.symbol.replace(".NS","");
-    const open=t.status==="open"&&t.pnl==null&&t.last_price!=null;
-    const pnl=t.pnl!=null?Number(t.pnl):open?(Number(t.last_price)-t.entry)*t.qty*(t.side==="BUY"?1:-1):null;
+    const tradePnl = getTradePnl(t);
+    const pnl = tradePnl.value;
     return <article className="trade-card" key={t.id}>
       <div className="trade-card-top">
         <span className="symbol-icon">{name.slice(0,2)}</span>
         <div className="trade-card-id"><strong>{name}</strong><small>#{t.id} · {formatDate(t.ts)}</small></div>
         <span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span>
-        <strong className={`trade-card-pnl ${pnl==null?"":pnl>=0?"positive-text":"negative-text"}`}>{pnl==null?"Open":preciseMoney(pnl)}</strong>
+        <strong className={`trade-card-pnl ${pnl==null?"":pnl>=0?"positive-text":"negative-text"}`}>{pnl==null?"—":preciseMoney(pnl)}</strong>
       </div>
       <div className="trade-card-mid"><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit==null?"Open":Number(t.exit).toFixed(2)}</span>
         <span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).split(" (")[0].replaceAll("_"," ")}</span></div>
@@ -187,7 +198,7 @@ function TradeTable({ trades }: { trades:PaperTrade[] }) {
         {open && <span className="mark-tag">unrealised · last {Number(t.last_price).toFixed(2)}</span>}
       </div>
     </article>;
-  })}</div><div className="table-scroll"><table><thead><tr><th>Trade / symbol</th><th>Side</th><th>Entry → exit</th><th>Exit reason</th><th>AI decision</th><th>Net P&L</th><th>Timestamp</th></tr></thead><tbody>{trades.map(t=><tr key={t.id}><td><div className="symbol-cell"><span className="symbol-icon">{t.symbol.replace(".NS","").slice(0,2)}</span><div><strong>{t.symbol.replace(".NS","")}</strong><small>#{t.id}</small></div></div></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span></td><td><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit == null ? "Open" : Number(t.exit).toFixed(2)}</span></td><td><span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).replaceAll("_"," ")}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision ?? "—"}</span></td><td className={Number(t.pnl)>=0?"positive-text":"negative-text"}>{t.pnl == null ? "—" : preciseMoney(Number(t.pnl))}</td><td className="date-cell">{formatDate(t.ts)}</td></tr>)}</tbody></table></div></>;
+  })}</div><div className="table-scroll"><table><thead><tr><th>Trade / symbol</th><th>Side</th><th>Entry → exit</th><th>Exit reason</th><th>AI decision</th><th>Net P&L</th><th>Timestamp</th></tr></thead><tbody>{trades.map(t=><tr key={t.id}><td><div className="symbol-cell"><span className="symbol-icon">{t.symbol.replace(".NS","").slice(0,2)}</span><div><strong>{t.symbol.replace(".NS","")}</strong><small>#{t.id}</small></div></div></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span></td><td><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit == null ? "Open" : Number(t.exit).toFixed(2)}</span></td><td><span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).replaceAll("_"," ")}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision ?? "—"}</span></td><td className={pnl==null?"":pnl>=0?"positive-text":"negative-text"}>{pnl == null ? "—" : <>{preciseMoney(pnl)}{tradePnl.kind==="unrealized" && <small className="pnl-kind">Unrealized</small>}{tradePnl.kind==="estimated" && <small className="pnl-kind">Estimated · excluded</small>}</>}</td><td className="date-cell">{formatDate(t.ts)}</td></tr>)}</tbody></table></div></>;
 }
 
 function Journal({ trades, query, setQuery, sideFilter, setSideFilter }: { trades:PaperTrade[]; query:string; setQuery:(v:string)=>void; sideFilter:string; setSideFilter:(v:string)=>void }) {
