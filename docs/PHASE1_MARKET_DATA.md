@@ -21,8 +21,9 @@ ATR and distance-from-VWAP measured in ATR units are exposed in the indicator sn
 
 ## Safety and rollout
 
-- This phase adds pure indicator calculations and tests; it does not change the live paper-trading strategy or enable order placement.
+- This phase adds a WebSocket V2 adapter, completed 5-minute candle builder, pure indicator calculations, and offline tests. The adapter is not wired into bot.py, so the existing strategy/feed remains unchanged and no order placement is enabled.
+- Candle buckets use the exchange packet timestamp; last-trade timestamp is retained only as a fallback. Volume is derived from changes in cumulative day volume, with last-traded quantity used for the first sample of a session.
 - SNAP_QUOTE access must be validated against the actual Angel One account before relying on the feed.
-- WebSocket packet freshness, reconnect/resubscribe behavior, and 5-minute candle aggregation must pass dedicated integration tests before the new feed can become the bot's primary data source.
+- The adapter uses the SDK SNAP_QUOTE subscription and configured retry policy. Real-account SNAP_QUOTE entitlement, actual packet fields, reconnect/resubscribe behaviour, and volume reconciliation still require a controlled market-hours smoke test before the new feed can become the bot's primary data source.
 - Telegram AI-confidence and risk-verdict fields remain a separate validation item.
 - Paper trading only. No live order API is used.
