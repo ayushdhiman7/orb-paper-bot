@@ -54,3 +54,54 @@ body { overflow-x: hidden; }
   .notice { padding: 10px 11px; }
   .backtest-summary { max-height: 440px; padding: 13px; font-size: 11px; }
 }
+
+
+/* Consistent inner spacing for panels used outside the overview-specific variants. */
+.main-grid > .panel,
+.backtest-detail {
+  padding: 18px 19px 15px;
+}
+.main-grid > .panel > .panel-heading,
+.backtest-detail > .panel-heading {
+  min-width: 0;
+}
+.main-grid > .panel .status-row {
+  gap: 12px;
+}
+.main-grid > .panel .status-row > span {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.main-grid > .panel .status-row strong {
+  flex: 0 1 auto;
+  max-width: 52%;
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.main-grid > .panel .insight-row {
+  gap: 10px;
+}
+.main-grid > .panel .insight-value {
+  max-width: 40%;
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.backtest-detail .backtest-summary {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+@media (max-width: 600px) {
+  .main-grid > .panel,
+  .backtest-detail {
+    padding: 14px 12px;
+  }
+  .main-grid > .panel .status-row strong {
+    max-width: 48%;
+  }
+  .main-grid > .panel .insight-value {
+    max-width: 42%;
+  }
+}
