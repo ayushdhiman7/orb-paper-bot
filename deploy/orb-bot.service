@@ -12,6 +12,8 @@ EnvironmentFile=-__DIR__/.env
 Environment=ONE_DAY=1
 Environment=LLM_MODE=shadow
 Environment=PYTHONUNBUFFERED=1
+Environment=ORB_LOCK_FILE=/tmp/orb-paper-bot.lock
+UMask=0077
 ExecStart=__DIR__/.venv/bin/python -u bot.py
 # The bot ends itself at 15:15 IST. No auto-restart: a restart would forget open paper positions.
 Restart=no
