@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import json
+import logging
 import os
 import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
@@ -14,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
+from starlette.concurrency import run_in_threadpool
 
 # Load the existing bot credentials without exposing them.
 load_dotenv(Path.home() / "orb-paper-bot" / ".env")
@@ -26,6 +28,7 @@ UTC = timezone.utc
 PAGE_SIZE = 1000
 WEBHOOK_MAX_SKEW_SECONDS = 300
 EVENT_BATCH_SIZE = 100
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ORB Dashboard API")
 
@@ -117,6 +120,21 @@ def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
     return hmac.compare_digest(expected, supplied)
 
 
+def _persist_dashboard_event(payload: dict) -> None:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    client.table("dashboard_events").upsert(
+        {
+            "event_id": payload["event_id"],
+            "event_type": payload["event_type"],
+            "occurred_at": payload["occurred_at"],
+            "source": str(payload.get("source", "orb-paper-bot"))[:80],
+            "data": payload["data"],
+        },
+        on_conflict="event_id",
+        ignore_duplicates=True,
+    ).execute()
+
+
 @app.post("/api/events")
 async def ingest_event(request: Request):
     raw_body = await request.body()
@@ -154,21 +172,35 @@ async def ingest_event(request: Request):
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
 
     try:
-        client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        client.table("dashboard_events").upsert(
-            {
-                "event_id": event_id,
-                "event_type": event_type,
-                "occurred_at": occurred_at,
-                "source": str(payload.get("source", "orb-paper-bot"))[:80],
-                "data": data,
-            },
-            on_conflict="event_id",
-            ignore_duplicates=True,
-        ).execute()
+        await run_in_threadpool(_persist_dashboard_event, payload)
         return {"status": "accepted", "event_id": event_id}
     except Exception:
+        logger.exception("Unable to persist dashboard webhook event_id=%s", event_id)
         raise HTTPException(status_code=502, detail="Unable to persist dashboard event")
+
+
+def _latest_dashboard_event_id() -> int:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    latest = (
+        client.table("dashboard_events")
+        .select("id")
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    return int(latest[0]["id"]) if latest else 0
+
+
+def _fetch_dashboard_events_after(cursor: int) -> list[dict]:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return (
+        client.table("dashboard_events")
+        .select("id,event_id,event_type,occurred_at,source,data,received_at")
+        .gt("id", cursor)
+        .order("id")
+        .limit(EVENT_BATCH_SIZE)
+        .execute()
+    ).data or []
 
 
 @app.get("/api/events/stream")
@@ -185,36 +217,21 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
     async def generate():
         cursor = after
         if cursor == 0:
-            # New browser sessions start at the current head; reconnects resume from Last-Event-ID.
             try:
-                client = create_client(SUPABASE_URL, SUPABASE_KEY)
-                latest = (
-                    client.table("dashboard_events")
-                    .select("id")
-                    .order("id", desc=True)
-                    .limit(1)
-                    .execute()
-                ).data or []
-                if latest:
-                    cursor = int(latest[0]["id"])
+                cursor = await run_in_threadpool(_latest_dashboard_event_id)
             except Exception:
-                # If the snapshot fails, cursor remains zero and the stream catches up.
+                logger.exception("Unable to establish initial dashboard SSE cursor")
+                # Continue from zero so events are not silently skipped.
                 cursor = 0
-            # Tell the browser the snapshot boundary. It refreshes authoritative data
-            # after this point, while events committed later are delivered below.
-            yield f"id: {cursor}\nevent: ready\ndata: {{\"cursor\":{cursor}}}\n\n"
+            # The browser refreshes its authoritative snapshot at this boundary.
+            yield f"id: {cursor}\\nevent: ready\\ndata: {{\\"cursor\\":{cursor}}}\\n\\n"
+
         last_keepalive = time_module.monotonic()
+        poll_backoff = 2
         while not await request.is_disconnected():
             try:
-                client = create_client(SUPABASE_URL, SUPABASE_KEY)
-                rows = (
-                    client.table("dashboard_events")
-                    .select("id,event_id,event_type,occurred_at,source,data,received_at")
-                    .gt("id", cursor)
-                    .order("id")
-                    .limit(EVENT_BATCH_SIZE)
-                    .execute()
-                ).data or []
+                rows = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
+                poll_backoff = 2
                 for row in rows:
                     cursor = max(cursor, int(row["id"]))
                     event_name = row["event_type"]
@@ -228,15 +245,17 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                         },
                         separators=(",", ":"),
                     )
-                    yield f"id: {cursor}\nevent: {event_name}\ndata: {body}\n\n"
+                    yield f"id: {cursor}\\nevent: {event_name}\\ndata: {body}\\n\\n"
                 if rows:
                     continue
             except Exception:
-                # A transient database error must not terminate EventSource reconnect handling.
-                pass
+                logger.exception("Dashboard SSE poll failed; retrying in %s seconds", poll_backoff)
+                await asyncio.sleep(poll_backoff)
+                poll_backoff = min(30, poll_backoff * 2)
+                continue
 
             if time_module.monotonic() - last_keepalive >= 15:
-                yield ": keep-alive\n\n"
+                yield ": keep-alive\\n\\n"
                 last_keepalive = time_module.monotonic()
             await asyncio.sleep(2)
 
@@ -249,7 +268,6 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
             "X-Accel-Buffering": "no",
         },
     )
-
 
 @app.get("/health")
 def health():
