@@ -27,8 +27,29 @@ INDIA_TZ = ZoneInfo("Asia/Kolkata")
 UTC = timezone.utc
 PAGE_SIZE = 1000
 WEBHOOK_MAX_SKEW_SECONDS = 300
-EVENT_BATCH_SIZE = 100
+EVENT_BATCH_SIZE = 1000
 logger = logging.getLogger(__name__)
+
+# Single-process fan-out: run the API with one Uvicorn worker. Events are
+# persisted before broadcast; reconnecting clients replay from their DB cursor.
+_event_subscribers: set[asyncio.Queue] = set()
+
+
+def _broadcast_event(event: dict) -> None:
+    for subscriber in tuple(_event_subscribers):
+        try:
+            subscriber.put_nowait(event)
+        except asyncio.QueueFull:
+            # Force this client to reconnect; Last-Event-ID will replay missed rows.
+            while not subscriber.empty():
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                subscriber.put_nowait({"_overflow": True})
+            except asyncio.QueueFull:
+                pass
 
 app = FastAPI(title="ORB Dashboard API")
 
@@ -120,7 +141,7 @@ def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
     return hmac.compare_digest(expected, supplied)
 
 
-def _persist_dashboard_event(payload: dict) -> None:
+def _persist_dashboard_event(payload: dict) -> dict | None:
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
     client.table("dashboard_events").upsert(
         {
@@ -133,6 +154,16 @@ def _persist_dashboard_event(payload: dict) -> None:
         on_conflict="event_id",
         ignore_duplicates=True,
     ).execute()
+    # Read back even on duplicate delivery: if the first request persisted but
+    # crashed before broadcasting, the retry must still wake connected clients.
+    result = (
+        client.table("dashboard_events")
+        .select("id,event_id,event_type,occurred_at,source,data")
+        .eq("event_id", payload["event_id"])
+        .limit(1)
+        .execute()
+    )
+    return (result.data or [None])[0]
 
 
 @app.post("/api/events")
@@ -172,8 +203,17 @@ async def ingest_event(request: Request):
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
 
     try:
-        await run_in_threadpool(_persist_dashboard_event, payload)
-        return {"status": "accepted", "event_id": event_id}
+        stored = await run_in_threadpool(_persist_dashboard_event, payload)
+        if stored:
+            _broadcast_event({
+                "id": int(stored["id"]),
+                "event_id": stored["event_id"],
+                "event_type": stored["event_type"],
+                "occurred_at": stored["occurred_at"],
+                "source": stored["source"],
+                "data": stored["data"],
+            })
+        return {"status": "accepted", "event_id": event_id, "duplicate": stored is None}
     except Exception:
         logger.exception("Unable to persist dashboard webhook event_id=%s", event_id)
         raise HTTPException(status_code=502, detail="Unable to persist dashboard event")
@@ -208,6 +248,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
     last_event_id = request.headers.get("Last-Event-ID", "").strip()
+    has_last_event_id = bool(last_event_id)
     if last_event_id:
         try:
             after = max(after, int(last_event_id))
@@ -216,49 +257,53 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
 
     async def generate():
         cursor = after
-        if cursor == 0:
-            try:
+        subscriber: asyncio.Queue = asyncio.Queue(maxsize=256)
+        # Subscribe before reading the durable cursor/history so events arriving
+        # during setup are either replayed from the DB or buffered in this queue.
+        _event_subscribers.add(subscriber)
+        try:
+            if not has_last_event_id:
                 cursor = await run_in_threadpool(_latest_dashboard_event_id)
-            except Exception:
-                logger.exception("Unable to establish initial dashboard SSE cursor")
-                # Continue from zero so events are not silently skipped.
-                cursor = 0
-            # The browser refreshes its authoritative snapshot at this boundary.
-            ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
-            yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
-
-        last_keepalive = time_module.monotonic()
-        poll_backoff = 2
-        while not await request.is_disconnected():
-            try:
-                rows = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
-                poll_backoff = 2
-                for row in rows:
+                ready_body = json.dumps({"cursor": cursor}, separators=(",", ":"))
+                yield f"id: {cursor}\nevent: ready\ndata: {ready_body}\n\n"
+            else:
+                missed = await run_in_threadpool(_fetch_dashboard_events_after, cursor)
+                for row in missed:
                     cursor = max(cursor, int(row["id"]))
-                    event_name = row["event_type"]
-                    body = json.dumps(
-                        {
-                            "event_id": row["event_id"],
-                            "event_type": event_name,
-                            "occurred_at": row["occurred_at"],
-                            "source": row["source"],
-                            "data": row["data"],
-                        },
-                        separators=(",", ":"),
-                    )
-                    yield f"id: {cursor}\nevent: {event_name}\ndata: {body}\n\n"
-                if rows:
-                    continue
-            except Exception:
-                logger.exception("Dashboard SSE poll failed; retrying in %s seconds", poll_backoff)
-                await asyncio.sleep(poll_backoff)
-                poll_backoff = min(30, poll_backoff * 2)
-                continue
+                    body = json.dumps({
+                        "event_id": row["event_id"],
+                        "event_type": row["event_type"],
+                        "occurred_at": row["occurred_at"],
+                        "source": row["source"],
+                        "data": row["data"],
+                    }, separators=(",", ":"))
+                    yield f"id: {cursor}\nevent: {row['event_type']}\ndata: {body}\n\n"
 
-            if time_module.monotonic() - last_keepalive >= 15:
-                yield ": keep-alive\n\n"
-                last_keepalive = time_module.monotonic()
-            await asyncio.sleep(2)
+            while not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(subscriber.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                if event.get("_overflow"):
+                    yield "event: resync\ndata: {}\n\n"
+                    break
+                event_id = int(event["id"])
+                if event_id <= cursor:
+                    continue
+                cursor = event_id
+                body = json.dumps({
+                    "event_id": event["event_id"],
+                    "event_type": event["event_type"],
+                    "occurred_at": event["occurred_at"],
+                    "source": event["source"],
+                    "data": event["data"],
+                }, separators=(",", ":"))
+                yield f"id: {cursor}\nevent: {event['event_type']}\ndata: {body}\n\n"
+        except Exception:
+            logger.exception("Dashboard SSE stream failed")
+        finally:
+            _event_subscribers.discard(subscriber)
 
     return StreamingResponse(
         generate(),

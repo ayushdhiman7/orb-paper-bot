@@ -8,9 +8,14 @@ the event to the dashboard API with an HMAC-SHA256 signature. Delivery failures 
 retried with exponential backoff; they do not alter trade state or broker behavior.
 
 The API deduplicates by `event_id` in `public.dashboard_events`. Webhook timestamps must be timezone-aware ISO-8601 values, and signatures must use the `sha256=` HMAC-SHA256 header format. The React dashboard
-uses Server-Sent Events as a notification channel. On connection, the API sends a `ready` event with the initial database cursor; the dashboard refreshes authoritative data at that boundary, then reloads data from
-`/api/dashboard`. SSE reconnects resume using `Last-Event-ID`; while disconnected,
-the dashboard falls back to a 30-second refresh.
+uses Server-Sent Events as the only automatic dashboard update channel. The API sends a
+`ready` event with the initial durable database cursor. After that, each accepted
+webhook is broadcast immediately to connected SSE clients; the stream does not poll
+Supabase. On reconnect, the API replays missed events from `Last-Event-ID` once, then
+waits for new webhook notifications. The browser uses native EventSource reconnection
+and never falls back to periodic dashboard polling. The API fan-out is in-memory and
+therefore must run as a single Uvicorn worker; durable events remain in Supabase for
+reconnect replay.
 
 ## Events
 
@@ -64,7 +69,7 @@ before any reload. Do not restart the bot to apply an API/Nginx-only change.
 1. Apply the database migration.
 2. Configure the same webhook secret in the API and bot environments.
 3. Add the Nginx SSE directives and validate the config.
-4. Deploy the updated API and verify `/health`, webhook auth rejection, and SSE.
+4. Deploy the updated API as a single Uvicorn worker and verify `/health`, webhook auth rejection, and SSE.
 5. Deploy the bot sender only after the API is ready.
 6. Confirm one paper entry/exit event end-to-end. Never generate test broker orders.
 
