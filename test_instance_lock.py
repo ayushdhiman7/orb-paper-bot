@@ -53,7 +53,8 @@ def test_lock_excludes_a_real_second_process_and_releases_on_exit(tmp_path, monk
         text=True,
     )
     try:
-        assert child.stdout.readline().strip() == "LOCKED"
+        output = [child.stdout.readline().strip() for _ in range(2)]
+        assert output[-1] == "LOCKED"
         monkeypatch.setenv("ORB_LOCK_FILE", str(lock_path))
         assert bot.acquire_instance_lock() is False
     finally:
