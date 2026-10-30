@@ -203,7 +203,7 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
             # Tell the browser the snapshot boundary. It refreshes authoritative data
             # after this point, while events committed later are delivered below.
             yield f"id: {cursor}\nevent: ready\ndata: {{\"cursor\":{cursor}}}\n\n"
-        last_keepalive = time.monotonic()
+        last_keepalive = time_module.monotonic()
         while not await request.is_disconnected():
             try:
                 client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -235,9 +235,9 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
                 # A transient database error must not terminate EventSource reconnect handling.
                 pass
 
-            if time.monotonic() - last_keepalive >= 15:
+            if time_module.monotonic() - last_keepalive >= 15:
                 yield ": keep-alive\n\n"
-                last_keepalive = time.monotonic()
+                last_keepalive = time_module.monotonic()
             await asyncio.sleep(2)
 
     return StreamingResponse(
