@@ -2,8 +2,8 @@
 Optional AI second opinion on each breakout, using Google's Gemini API.
 
 Every actual HTTP attempt reserves a durable Gemini quota slot immediately before
-network I/O. Missing credentials, quota exhaustion, corrupt quota state, or network
-failure fail closed and return None; existing paper strategy behaviour is unchanged.
+network I/O. Structured decisions are durably audited without storing prompts,
+raw responses, or credentials. Audit failure suppresses the AI opinion.
 """
 import json
 import os
@@ -13,6 +13,7 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from ai_audit import AuditWriteError, append_decision
 from gemini_quota import PersistentGeminiQuota, QuotaStateError
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -31,6 +32,15 @@ def _get_quota():
             per_minute_limit=int(os.getenv("GEMINI_MAX_REQUESTS_PER_MINUTE", "5")),
         )
     return _quota
+
+
+def _audit(event):
+    try:
+        append_decision(event)
+        return True
+    except (AuditWriteError, OSError, ValueError) as exc:
+        print(f"[warn] AI opinion suppressed because audit persistence failed ({type(exc).__name__})")
+        return False
 
 
 PROMPT = """You are a cautious intraday-trading risk reviewer for a PAPER-trading bot on Indian (NSE) stocks.
@@ -89,56 +99,98 @@ def _parse(text, allowed=("take", "skip")):
     return {"decision": decision, "reason": str(data.get("reason", ""))[:200]}
 
 
-def _ask(prompt, allowed):
-    """Send a Gemini request. Every HTTP attempt consumes one reserved quota slot."""
+def _ask(prompt, allowed, *, event_type="entry_review", symbol="UNKNOWN"):
+    """Send Gemini request; quota and audit persistence are mandatory fail-closed gates."""
     global _working
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
+        _audit({"event_type": event_type, "symbol": symbol, "status": "unavailable",
+                "error_type": "MissingApiKey"})
         return None
     try:
         quota = _get_quota()
     except Exception as exc:
+        _audit({"event_type": event_type, "symbol": symbol, "status": "unavailable",
+                "error_type": type(exc).__name__})
         print(f"[warn] Gemini request blocked by quota configuration ({type(exc).__name__})")
         return None
+
     for model in _models():
         body = {"contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
         for attempt in (0, 1):
+            started = datetime.now(IST)
             try:
                 try:
-                    reserved, reason = quota.reserve(datetime.now(IST))
+                    reserved, reason = quota.reserve(started)
                 except (QuotaStateError, OSError, ValueError) as exc:
+                    _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                            "attempt": attempt + 1, "status": "unavailable",
+                            "error_type": type(exc).__name__})
                     print(f"[warn] Gemini request blocked by quota state ({type(exc).__name__})")
                     return None
                 if not reserved:
+                    _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                            "attempt": attempt + 1, "status": "quota_blocked",
+                            "quota_reason": reason})
                     print(f"[warn] Gemini request blocked ({reason})")
                     return None
-                resp = _post(model, body, key)
-                response_text = resp["candidates"][0]["content"]["parts"][0]["text"]
+
+                response = _post(model, body, key)
+                response_text = response["candidates"][0]["content"]["parts"][0]["text"]
                 out = _parse(response_text, allowed)
+                elapsed = int((datetime.now(IST) - started).total_seconds() * 1000)
                 if out:
+                    status = "approved" if out["decision"] in {"take", "hold"} else "rejected"
+                    saved = _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                                    "attempt": attempt + 1, "status": status,
+                                    "decision": out["decision"], "reason": out["reason"],
+                                    "duration_ms": elapsed})
+                    if not saved:
+                        return None
                     _working = model
                     out["model"] = model
                     return out
+
+                _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                        "attempt": attempt + 1, "status": "invalid_response",
+                        "duration_ms": elapsed})
                 print(f"[warn] AI reply unreadable from {model}")
                 return None
-            except urllib.error.HTTPError as e:
-                if e.code == 400 and attempt == 0 and "generationConfig" in body:
+            except urllib.error.HTTPError as exc:
+                elapsed = int((datetime.now(IST) - started).total_seconds() * 1000)
+                saved = _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                                "attempt": attempt + 1, "status": "unavailable",
+                                "http_status": exc.code, "error_type": "HTTPError",
+                                "duration_ms": elapsed})
+                if not saved:
+                    return None
+                if exc.code == 400 and attempt == 0 and "generationConfig" in body:
                     body = {"contents": body["contents"]}
                     continue
-                print(f"[warn] AI call failed on {model}: HTTP {e.code}")
+                print(f"[warn] AI call failed on {model}: HTTP {exc.code}")
                 break
-            except Exception as e:
-                print(f"[warn] AI call failed on {model}: {type(e).__name__}")
+            except Exception as exc:
+                elapsed = int((datetime.now(IST) - started).total_seconds() * 1000)
+                saved = _audit({"event_type": event_type, "symbol": symbol, "model": model,
+                                "attempt": attempt + 1, "status": "unavailable",
+                                "error_type": type(exc).__name__, "duration_ms": elapsed})
+                if not saved:
+                    return None
+                print(f"[warn] AI call failed on {model}: {type(exc).__name__}")
                 break
     return None
 
 
 def review(ctx):
     """Entry opinion: take or skip this breakout. ctx is a small dict of facts. Returns dict or None."""
-    return _ask(PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)), ("take", "skip"))
+    symbol = ctx.get("symbol", "UNKNOWN") if isinstance(ctx, dict) else "UNKNOWN"
+    return _ask(PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)),
+                ("take", "skip"), event_type="entry_review", symbol=symbol)
 
 
 def review_exit(ctx):
     """Exit opinion on an OPEN trade: hold or exit now. Returns dict or None (None means: keep holding)."""
-    return _ask(EXIT_PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)), ("hold", "exit"))
+    symbol = ctx.get("symbol", "UNKNOWN") if isinstance(ctx, dict) else "UNKNOWN"
+    return _ask(EXIT_PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)),
+                ("hold", "exit"), event_type="position_review", symbol=symbol)
