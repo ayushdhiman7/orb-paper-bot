@@ -131,3 +131,39 @@ def test_sell_geometry_and_sizing():
 
 def test_no_candidates_is_noop():
     assert validate_batch([], [], _limits()) == ([], [])
+
+
+
+@pytest.mark.parametrize("overrides", [
+    {"daily_loss_cap_pct": 0},
+    {"daily_loss_cap_pct": 101},
+    {"max_trades_per_day": -1},
+    {"trades_today": -1},
+    {"open_positions": -1},
+    {"capital": float("inf")},
+    {"day_pnl": float("nan")},
+])
+def test_invalid_portfolio_limits_fail_closed(overrides):
+    with pytest.raises(ValueError):
+        validate_batch([_candidate()], [_decision()], _limits(**overrides))
+
+
+@pytest.mark.parametrize("bad_decision", [
+    {**_decision(), "confidence": float("nan")},
+    {**_decision(), "confidence": True},
+    {**_decision(), "rank": True},
+    {**_decision(), "rank": 0},
+    {**_decision(), "decision": "HOLD"},
+    {**_decision(), "reason": ""},
+])
+def test_validator_rejects_unparsed_or_malformed_decisions(bad_decision):
+    with pytest.raises(ValueError):
+        validate_batch([_candidate()], [bad_decision], _limits())
+
+
+def test_parser_normalizes_expected_symbol_case():
+    parsed = parse_batch_response(
+        json.dumps({"decisions": [_decision(symbol="reliance.ns")]}),
+        {"reliance.ns"},
+    )
+    assert parsed[0]["symbol"] == "RELIANCE.NS"
