@@ -77,6 +77,9 @@ def parse_batch_response(raw: str, expected_symbols: set[str]) -> list[dict]:
     if not isinstance(items, list) or len(items) != len(expected_symbols):
         raise ValueError("batch must contain exactly one decision per candidate")
 
+    normalized_expected = {str(s).strip().upper() for s in expected_symbols}
+    if not normalized_expected or "" in normalized_expected:
+        raise ValueError("expected symbols must be non-empty")
     seen: set[str] = set()
     parsed: list[dict] = []
     ranks: set[int] = set()
@@ -85,7 +88,7 @@ def parse_batch_response(raw: str, expected_symbols: set[str]) -> list[dict]:
             raise ValueError("each decision must be an object")
         symbol = str(item.get("symbol", "")).strip().upper()
         decision = str(item.get("decision", "")).strip().upper()
-        if symbol not in expected_symbols or symbol in seen:
+        if symbol not in normalized_expected or symbol in seen:
             raise ValueError("unknown or duplicate candidate symbol")
         if decision not in DECISIONS:
             raise ValueError(f"unsupported decision for {symbol}")
@@ -118,7 +121,7 @@ def parse_batch_response(raw: str, expected_symbols: set[str]) -> list[dict]:
             "symbol": symbol, "decision": decision, "confidence": confidence,
             "reason": reason, "stop": stop, "target": target, "rank": rank_value,
         })
-    if seen != {str(s).upper() for s in expected_symbols}:
+    if seen != normalized_expected:
         raise ValueError("batch symbol coverage mismatch")
     return sorted(parsed, key=lambda item: item["rank"])
 
@@ -136,21 +139,72 @@ def validate_batch(
     """
     if not candidates:
         return [], []
+    numeric_limits = {
+        "capital": limits.capital,
+        "available_cash": limits.available_cash,
+        "risk_per_trade_pct": limits.risk_per_trade_pct,
+        "daily_loss_cap_pct": limits.daily_loss_cap_pct,
+        "day_pnl": limits.day_pnl,
+        "min_confidence": limits.min_confidence,
+    }
+    for field, value in numeric_limits.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{field} must be finite and numeric")
     if limits.capital <= 0 or limits.available_cash < 0:
         raise ValueError("invalid portfolio capital or available cash")
     if not 0 < limits.risk_per_trade_pct <= 100:
         raise ValueError("risk_per_trade_pct must be in (0, 100]")
+    if not 0 < limits.daily_loss_cap_pct <= 100:
+        raise ValueError("daily_loss_cap_pct must be in (0, 100]")
     if not 0 <= limits.min_confidence <= 1:
         raise ValueError("min_confidence must be in [0, 1]")
-    if limits.max_positions < 1 or limits.open_positions < 0:
-        raise ValueError("invalid position limits")
+    for field, value in {
+        "max_positions": limits.max_positions,
+        "open_positions": limits.open_positions,
+        "max_trades_per_day": limits.max_trades_per_day,
+        "trades_today": limits.trades_today,
+    }.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{field} must be a non-negative integer")
+    if limits.max_positions < 1:
+        raise ValueError("max_positions must be at least 1")
 
-    by_symbol = {c.symbol.upper(): c for c in candidates}
-    if len(by_symbol) != len(candidates):
-        raise ValueError("candidate symbols must be unique")
-    by_decision = {str(d.get("symbol", "")).upper(): d for d in decisions}
-    if len(by_decision) != len(decisions) or set(by_decision) != set(by_symbol):
+    by_symbol = {}
+    for candidate in candidates:
+        symbol = str(candidate.symbol).strip().upper()
+        if not symbol or symbol in by_symbol:
+            raise ValueError("candidate symbols must be non-empty and unique")
+        if str(candidate.signal_side).strip().upper() not in {"BUY", "SELL"}:
+            raise ValueError(f"{symbol}.signal_side must be BUY or SELL")
+        by_symbol[symbol] = candidate
+
+    by_decision = {}
+    for decision in decisions:
+        if not isinstance(decision, Mapping):
+            raise ValueError("each decision must be a mapping")
+        symbol = str(decision.get("symbol", "")).strip().upper()
+        if not symbol or symbol in by_decision:
+            raise ValueError("decision symbols must be non-empty and unique")
+        by_decision[symbol] = decision
+    if set(by_decision) != set(by_symbol):
         raise ValueError("decisions must cover each candidate exactly once")
+
+    for symbol, decision in by_decision.items():
+        confidence = decision.get("confidence")
+        rank = decision.get("rank")
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError(f"{symbol}.confidence must be finite and within 0..1")
+        if isinstance(rank, bool) or not isinstance(rank, int) or rank < 1:
+            raise ValueError(f"{symbol}.rank must be a positive integer")
+        side = str(decision.get("decision", "")).strip().upper()
+        if side not in DECISIONS:
+            raise ValueError(f"{symbol}.decision is unsupported")
+        reason = str(decision.get("reason", "")).strip()
+        if not reason or len(reason) > 300:
+            raise ValueError(f"{symbol}.reason must contain 1-300 characters")
+    ranks = [d["rank"] for d in by_decision.values()]
+    if len(set(ranks)) != len(ranks):
+        raise ValueError("decision ranks must be unique")
 
     rejections: list[dict] = []
     accepted: list[ValidatedEntry] = []
@@ -160,7 +214,7 @@ def validate_batch(
     risk_budget = limits.capital * limits.risk_per_trade_pct / 100
     loss_cap_hit = limits.day_pnl <= -limits.capital * limits.daily_loss_cap_pct / 100
 
-    for decision in sorted(decisions, key=lambda d: int(d.get("rank", 0))):
+    for decision in sorted(by_decision.values(), key=lambda d: d["rank"]):
         symbol = str(decision["symbol"]).upper()
         candidate = by_symbol[symbol]
         side = str(decision["decision"]).upper()
