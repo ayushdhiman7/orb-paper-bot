@@ -43,8 +43,12 @@ class FakeFeed:
         self.quote_by_symbol = quote_by_symbol or {}
         self.candles_by_symbol = candles_by_symbol or {}
 
-    def last(self, symbol):
-        return self.quote_by_symbol.get(symbol)
+    def quote(self, symbol, now):
+        price = self.quote_by_symbol.get(symbol)
+        if price is None:
+            return None
+        stamp = now - timedelta(seconds=1)
+        return {"price": price, "event_time": stamp, "received_at": stamp.timestamp()}
 
     def candles(self, symbol):
         return self.candles_by_symbol.get(symbol, [])
