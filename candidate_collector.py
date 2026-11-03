@@ -106,7 +106,10 @@ def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_s
             receive_age = now.timestamp() - float(received_at)
             if event_age < -5 or event_age > 45 or receive_age < 0 or receive_age > 45:
                 continue
-            price = float(quote.get("price"))
+            raw_price = quote.get("price")
+            if isinstance(raw_price, bool):
+                continue
+            price = float(raw_price)
             if not isfinite(price) or price <= 0:
                 continue
             candles = feed.candles(symbol)
