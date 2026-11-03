@@ -63,24 +63,38 @@ def recompute_paper_execution(
     if side not in {"BUY", "SELL"} or side != str(candidate.signal_side).strip().upper():
         return None
 
-    # The portfolio snapshot is intentionally checked again at execution time.
-    if limits.open_positions >= limits.max_positions:
+    # Validate the fresh portfolio snapshot before applying any comparisons.
+    capital = _number(limits.capital, "capital", positive=True)
+    cash = _number(limits.available_cash, "available_cash")
+    risk_pct = _number(limits.risk_per_trade_pct, "risk_per_trade_pct", positive=True)
+    loss_pct = _number(limits.daily_loss_cap_pct, "daily_loss_cap_pct", positive=True)
+    day_pnl = _number(limits.day_pnl, "day_pnl")
+    min_confidence = _number(limits.min_confidence, "min_confidence")
+    counters = {
+        "max_positions": limits.max_positions,
+        "open_positions": limits.open_positions,
+        "max_trades_per_day": limits.max_trades_per_day,
+        "trades_today": limits.trades_today,
+    }
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0
+           for value in counters.values()):
+        return None
+    confidence = _number(entry.confidence, "confidence")
+    if (cash < 0 or not 0 < risk_pct <= 100 or not 0 < loss_pct <= 100
+            or not 0 <= min_confidence <= 1 or not 0 <= confidence <= 1):
+        return None
+    if limits.max_positions < 1 or limits.open_positions >= limits.max_positions:
         return None
     if limits.trades_today >= limits.max_trades_per_day:
         return None
-    if limits.day_pnl <= -(limits.capital * limits.daily_loss_cap_pct / 100):
+    if day_pnl <= -(capital * loss_pct / 100):
         return None
-    if entry.confidence < limits.min_confidence:
+    if confidence < min_confidence:
         return None
 
     price = _number(candidate.current_price, "current_price", positive=True)
     stop = _number(entry.stop, "stop", positive=True)
     target = _number(entry.target, "target", positive=True)
-    capital = _number(limits.capital, "capital", positive=True)
-    cash = _number(limits.available_cash, "available_cash")
-    risk_pct = _number(limits.risk_per_trade_pct, "risk_per_trade_pct", positive=True)
-    if cash < 0 or not 0 < risk_pct <= 100:
-        return None
 
     direction = 1 if side == "BUY" else -1
     entry_fill = price * (1 + direction * slip / 100)
