@@ -41,3 +41,16 @@ export async function loadDashboardData(range: DashboardRange): Promise<Dashboar
     backtests: data.backtests as BacktestRun[],
   };
 }
+
+
+export async function requestManualExit(tradeId: number | string, controlToken: string): Promise<{ request_id: number; status: string; symbol: string }> {
+  if (!apiBase) throw new Error("Backend API is not configured.");
+  const response = await fetch(`${apiBase}/api/paper-trades/${encodeURIComponent(String(tradeId))}/manual-exit`, {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${controlToken}` },
+    credentials: "include",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Manual exit request failed (HTTP ${response.status}).`);
+  return payload as { request_id: number; status: string; symbol: string };
+}
