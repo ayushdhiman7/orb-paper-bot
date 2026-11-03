@@ -75,7 +75,7 @@ def _opening_range(candles, session_date):
 def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_symbols=None):
     """Return all aligned live ORB candidates, ordered by symbol.
 
-    feed must expose last(symbol) and candles(symbol). A stale/missing quote,
+    feed must expose quote(symbol, now) with price, event_time and received_at, plus candles(symbol). A stale/missing quote,
     incomplete opening range, insufficient indicator history, neutral trend,
     or VWAP disagreement excludes the symbol. Sentiment is optional context only.
     """
@@ -94,10 +94,19 @@ def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_s
         if symbol in excluded:
             continue
         try:
-            price = feed.last(symbol)
-            if price is None:
+            # Require timestamped evidence from the connected WebSocket adapter.
+            quote = feed.quote(symbol, now)
+            if not isinstance(quote, dict):
                 continue
-            price = float(price)
+            event_time = _timestamp(quote.get("event_time"))
+            received_at = quote.get("received_at")
+            if isinstance(received_at, bool) or not isinstance(received_at, (int, float)) or not isfinite(received_at):
+                continue
+            event_age = now.timestamp() - event_time.timestamp()
+            receive_age = now.timestamp() - float(received_at)
+            if event_age < -5 or event_age > 45 or receive_age < 0 or receive_age > 45:
+                continue
+            price = float(quote.get("price"))
             if not isfinite(price) or price <= 0:
                 continue
             candles = feed.candles(symbol)
@@ -129,6 +138,7 @@ def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_s
                 "symbol": symbol,
                 "side": side,
                 "price": round(price, 4),
+                "quote_evidence": {"event_time": event_time.isoformat(), "received_at": float(received_at)},
                 "opening_range_high": round(range_high, 4),
                 "opening_range_low": round(range_low, 4),
                 "indicators": {
