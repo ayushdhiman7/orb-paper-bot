@@ -1,6 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from angel_websocket import AngelWebSocketFeed
 
 IST = ZoneInfo("Asia/Kolkata")
