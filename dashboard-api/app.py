@@ -335,12 +335,12 @@ def _create_manual_exit_request(trade_id: int) -> dict:
     pending = (client.table("manual_exit_requests").select("id,status")
                .eq("trade_id", trade_id).eq("status", "pending").limit(1).execute().data or [])
     if pending:
-        return {"request_id": pending[0]["id"], "status": "pending", "symbol": trade[0]["symbol"]}
+        return {"request_id": pending[0]["id"], "request_status": "pending", "symbol": trade[0]["symbol"]}
     created = (client.table("manual_exit_requests").insert({"trade_id": trade_id, "status": "pending"})
                .select("id,status").execute().data or [])
     if not created:
         raise RuntimeError("Manual exit request was not persisted")
-    return {"request_id": created[0]["id"], "status": created[0]["status"], "symbol": trade[0]["symbol"]}
+    return {"request_id": created[0]["id"], "request_status": created[0]["status"], "symbol": trade[0]["symbol"]}
 
 
 @app.post("/api/paper-trades/{trade_id}/manual-exit")
