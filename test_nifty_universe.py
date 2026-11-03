@@ -40,7 +40,7 @@ def test_rejects_incomplete_or_duplicate_constituent_list():
     with pytest.raises(UniverseError, match="exactly 50"):
         parse_nse_constituents(nse.replace("Company 49,Industry,STOCK49,EQ,ISIN49\n", ""))
     with pytest.raises(UniverseError, match="duplicate"):
-        parse_nse_constituents(nse + "Company X,Industry,STOCK00,EQ,ISINX\n")
+        parse_nse_constituents(nse.replace("Company 49,Industry,STOCK49,EQ,ISIN49", "Company 49,Industry,STOCK00,EQ,ISIN49"))
 
 
 def test_rejects_missing_and_ambiguous_tokens():
