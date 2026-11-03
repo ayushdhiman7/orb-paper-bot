@@ -13,7 +13,7 @@ _SENT = set()
 def format_message(message):
     """Add a consistent Telegram emoji to known lifecycle and safety alerts."""
     text = str(message)
-    if text.startswith(("🚀", "📈", "📉", "✅", "⚠️", "🛑", "🔔")):
+    if text.startswith(("🚀", "📈", "📉", "🟢", "🔴", "🚪", "✅", "⚠️", "🛑", "🔔")):
         return text
     prefixes = (
         ("Paper bot started", "🚀"),
