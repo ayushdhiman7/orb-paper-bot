@@ -29,6 +29,8 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
   const [manualExitStatus, setManualExitStatus] = useState<Record<string, string>>({});
+  const [manualExitTrade, setManualExitTrade] = useState<PaperTrade | null>(null);
+  const [manualExitToken, setManualExitToken] = useState("");
 
   const refresh = useCallback(async (range: DashboardRange) => {
     const currentRequest = ++requestId.current;
@@ -74,20 +76,26 @@ function App() {
     return () => source.close();
   }, [refresh, activeRange]);
 
-  const handleManualExit = useCallback(async (trade: PaperTrade) => {
+  const handleManualExit = useCallback((trade: PaperTrade) => {
     const symbol = trade.symbol.replace(".NS", "");
     if (!window.confirm("Request a manual paper exit for " + symbol + "? The bot will close it at the next fresh market price. This does not send a broker order.")) return;
-    const token = window.prompt("Enter the dashboard control token to authorize this paper exit:");
-    if (!token?.trim()) return;
-    const key = String(trade.id);
+    setManualExitToken("");
+    setManualExitTrade(trade);
+  }, []);
+
+  const submitManualExit = useCallback(async () => {
+    if (!manualExitTrade || !manualExitToken.trim()) return;
+    const key = String(manualExitTrade.id);
     setManualExitStatus(current => ({ ...current, [key]: "Submitting…" }));
     try {
-      const result = await requestManualExit(trade.id, token.trim());
+      const result = await requestManualExit(manualExitTrade.id, manualExitToken.trim());
       setManualExitStatus(current => ({ ...current, [key]: "Exit queued · request #" + result.request_id }));
+      setManualExitTrade(null);
+      setManualExitToken("");
     } catch (e) {
       setManualExitStatus(current => ({ ...current, [key]: e instanceof Error ? "Failed · " + e.message : "Exit request failed" }));
     }
-  }, []);
+  }, [manualExitTrade, manualExitToken]);
   const closedTrades = data.trades.filter(
     t => t.status !== "open" && t.pnl !== null && !t.exit_estimated,
   );
@@ -176,6 +184,19 @@ function App() {
             {tab === "Risk monitor" && <RiskPage trades={closedTrades} openTrades={openTrades} totalPnl={totalPnl}/>}
           </>
         )}
+        {manualExitTrade && <div className="manual-exit-modal-backdrop" role="presentation">
+          <section className="manual-exit-modal" role="dialog" aria-modal="true" aria-labelledby="manual-exit-title">
+            <h2 id="manual-exit-title">Authorize paper exit</h2>
+            <p>Exit {manualExitTrade.symbol.replace(".NS", "")} · trade #{manualExitTrade.id}</p>
+            <label htmlFor="manual-exit-token">Dashboard control token</label>
+            <input id="manual-exit-token" type="password" autoComplete="off" value={manualExitToken} onChange={event => setManualExitToken(event.target.value)} placeholder="Enter control token"/>
+            <small>The bot will close this paper position only after it receives a fresh market price. No broker order is sent.</small>
+            <div className="manual-exit-modal-actions">
+              <button className="button-secondary" onClick={() => { setManualExitTrade(null); setManualExitToken(""); }}>Cancel</button>
+              <button className="manual-exit-button" onClick={() => void submitManualExit()} disabled={!manualExitToken.trim() || manualExitStatus[String(manualExitTrade.id)]?.startsWith("Submitting")}>Confirm exit request</button>
+            </div>
+          </section>
+        </div>}
         <footer className="footer"><span><ShieldCheck size={14}/> Paper trading only · No broker orders</span><span>ORB Terminal <b>v0.1</b> <span className="footer-sep">·</span> Data source: Live API</span></footer>
       </div>
     </main>
