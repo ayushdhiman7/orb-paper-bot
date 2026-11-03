@@ -717,6 +717,8 @@ def run():
             time.sleep(30 if FEED is not None and t < MARKET_OPEN and now.weekday() < 5 else 300)
             continue
 
+        process_manual_exit_requests(state, now)
+
         if t >= SQUARE_OFF:
             for sym in list(state.positions):
                 p = last_price(sym)
@@ -738,7 +740,6 @@ def run():
                     if r:
                         state.ranges[sym] = r
                         print(f"[RANGE] {sym}: high {r[0]:.2f} low {r[1]:.2f}")
-            process_manual_exit_requests(state, now)
             manage_positions(state, now)
             manage_control_positions(state, now)
             check_daily_cap(state)
