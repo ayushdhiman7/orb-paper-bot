@@ -276,3 +276,58 @@ def test_supabase_client_is_initialized_lazily_before_startup_check(monkeypatch)
     monkeypatch.setattr(bot, "assert_safe_startup", startup_check)
     with pytest.raises(StartupReached):
         bot.run()
+
+
+class _ManualExitQuery:
+    def __init__(self, table, rows=None):
+        self.table_name = table
+        self.rows = rows or []
+        self.update_values = None
+    def select(self, *_args): return self
+    def eq(self, *_args): return self
+    def order(self, *_args, **_kwargs): return self
+    def limit(self, *_args): return self
+    def update(self, values):
+        self.update_values = values
+        return self
+    def execute(self):
+        if self.update_values is not None:
+            self.table_name.updates.append(self.update_values)
+        return type("Result", (), {"data": self.rows})()
+
+
+class _ManualExitSB:
+    def __init__(self, pending):
+        self.pending = pending
+        self.updates = []
+    def table(self, name):
+        return _ManualExitQuery(self, self.pending if name == "manual_exit_requests" else [])
+
+
+def test_manual_exit_request_closes_matching_paper_position_at_fresh_price(monkeypatch):
+    pos = bot.Position("TCS.NS", "BUY", 2, 100.0, 99.0, 102.0, NOW, row_id=55)
+    state = bot.State(positions={"TCS.NS": pos})
+    fake = _ManualExitSB([{"id": 8, "trade_id": 55}])
+    monkeypatch.setattr(bot, "SB", fake)
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.25)
+    closed = []
+    def close(st, symbol, price, reason, now):
+        closed.append((symbol, price, reason))
+        st.positions.pop(symbol)
+        return True
+    monkeypatch.setattr(bot, "close_position", close)
+    bot.process_manual_exit_requests(state, NOW)
+    assert closed == [("TCS.NS", 101.25, "manual_exit")]
+    assert fake.updates == [{"status": "executed", "processed_at": NOW.isoformat(), "result_reason": "closed_at_fresh_market_price"}]
+
+
+def test_manual_exit_request_stays_pending_without_fresh_price(monkeypatch):
+    pos = bot.Position("TCS.NS", "BUY", 2, 100.0, 99.0, 102.0, NOW, row_id=55)
+    state = bot.State(positions={"TCS.NS": pos})
+    fake = _ManualExitSB([{"id": 8, "trade_id": 55}])
+    monkeypatch.setattr(bot, "SB", fake)
+    monkeypatch.setattr(bot, "last_price", lambda _symbol: None)
+    monkeypatch.setattr(bot, "close_position", lambda *_args: pytest.fail("must not close without a fresh quote"))
+    bot.process_manual_exit_requests(state, NOW)
+    assert "TCS.NS" in state.positions
+    assert fake.updates == []
