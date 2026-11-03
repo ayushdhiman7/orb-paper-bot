@@ -6,7 +6,7 @@ import pytest
 from candidate_collector import CandidateCollectionError, collect_candidates
 
 IST = ZoneInfo("Asia/Kolkata")
-TODAY = datetime(2026, 11, 3, 10, 0, tzinfo=IST)
+TODAY = datetime(2026, 11, 3, 13, 0, tzinfo=IST)
 
 
 def universe():
@@ -53,7 +53,7 @@ class FakeFeed:
 def test_collects_aligned_breakout_candidates_as_one_batch():
     u = universe()
     feed = FakeFeed(
-        {"STOCK00": 104.0},
+        {"STOCK00": 115.0},
         {"STOCK00": bars()},
     )
     result = collect_candidates(u, feed, TODAY, {"STOCK00": {"score": 0.7}})
@@ -66,7 +66,7 @@ def test_collects_aligned_breakout_candidates_as_one_batch():
 def test_skips_missing_quote_incomplete_opening_range_and_neutral_price():
     u = universe()
     feed = FakeFeed(
-        {"STOCK00": 104.0, "STOCK01": 104.0, "STOCK02": 101.0},
+        {"STOCK00": 104.0, "STOCK01": 115.0, "STOCK02": 101.0},
         {"STOCK00": bars()[:2], "STOCK01": bars(), "STOCK02": bars()},
     )
     result = collect_candidates(u, feed, TODAY)
