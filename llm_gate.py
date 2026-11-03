@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from ai_audit import AuditWriteError, append_decision
 from gemini_quota import PersistentGeminiQuota, QuotaStateError
+from batch_entry import parse_batch_response
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
@@ -99,7 +100,7 @@ def _parse(text, allowed=("take", "skip")):
     return {"decision": decision, "reason": str(data.get("reason", ""))[:200]}
 
 
-def _ask(prompt, allowed, *, event_type="entry_review", symbol="UNKNOWN"):
+def _ask(prompt, allowed, *, event_type="entry_review", symbol="UNKNOWN", parser=None, audit_decision=None):
     """Send Gemini request; quota and audit persistence are mandatory fail-closed gates."""
     global _working
     key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -138,13 +139,18 @@ def _ask(prompt, allowed, *, event_type="entry_review", symbol="UNKNOWN"):
 
                 response = _post(model, body, key)
                 response_text = response["candidates"][0]["content"]["parts"][0]["text"]
-                out = _parse(response_text, allowed)
+                try:
+                    out = parser(response_text) if parser is not None else _parse(response_text, allowed)
+                except (TypeError, ValueError, KeyError):
+                    out = None
                 elapsed = int((datetime.now(IST) - started).total_seconds() * 1000)
                 if out:
-                    status = "approved" if out["decision"] in {"take", "hold"} else "rejected"
+                    decision_value = audit_decision or out["decision"]
+                    status = "approved" if decision_value in {"take", "hold", "batch"} else "rejected"
                     saved = _audit({"event_type": event_type, "symbol": symbol, "model": model,
                                     "attempt": attempt + 1, "status": status,
-                                    "decision": out["decision"], "reason": out["reason"],
+                                    "decision": decision_value,
+                                    "reason": out.get("reason", f"validated batch with {len(out.get('decisions', []))} decisions"),
                                     "duration_ms": elapsed})
                     if not saved:
                         return None
@@ -194,3 +200,30 @@ def review_exit(ctx):
     symbol = ctx.get("symbol", "UNKNOWN") if isinstance(ctx, dict) else "UNKNOWN"
     return _ask(EXIT_PROMPT.format(ctx=json.dumps(ctx, indent=2, default=str)),
                 ("hold", "exit"), event_type="position_review", symbol=symbol)
+
+
+BATCH_PROMPT = """You are a cautious intraday trading decision engine for a PAPER-ONLY NSE ORB system.
+Review the complete candidate list together and return exactly one decision per candidate.
+Do not invent facts. Never reverse the candidate's existing breakout side.
+Return JSON only: {{"decisions":[{{"symbol":"...","decision":"BUY|SELL|SKIP",
+"confidence":0.0,"reason":"short evidence-based reason","stop":0.0,"target":0.0,"rank":1}}]}}
+For SKIP, stop and target must both be null. For BUY/SELL, provide positive stop and target
+consistent with the side and current price. Rank every candidate uniquely from 1.
+Candidate batch:
+{ctx}"""
+
+
+def review_batch(ctx, expected_symbols):
+    """One Gemini request for the entire candidate batch; malformed/partial output fails closed."""
+    if not isinstance(ctx, list) or not ctx or not isinstance(expected_symbols, set) or not expected_symbols:
+        return None
+    if not os.getenv("GEMINI_API_KEY", "").strip():
+        _audit({"event_type": "entry_review", "symbol": "NIFTY50_BATCH", "status": "unavailable",
+                "error_type": "MissingApiKey"})
+        return None
+    prompt = BATCH_PROMPT.format(ctx=json.dumps(ctx, separators=(",", ":"), default=str))
+    def parse(text):
+        return {"decisions": parse_batch_response(text, expected_symbols),
+                "reason": f"validated complete batch of {len(expected_symbols)} candidates"}
+    return _ask(prompt, (), event_type="entry_review", symbol="NIFTY50_BATCH",
+                parser=parse, audit_decision="batch")

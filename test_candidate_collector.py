@@ -43,8 +43,12 @@ class FakeFeed:
         self.quote_by_symbol = quote_by_symbol or {}
         self.candles_by_symbol = candles_by_symbol or {}
 
-    def last(self, symbol):
-        return self.quote_by_symbol.get(symbol)
+    def quote(self, symbol, now):
+        price = self.quote_by_symbol.get(symbol)
+        if price is None:
+            return None
+        stamp = now - timedelta(seconds=1)
+        return {"price": price, "event_time": stamp, "received_at": stamp.timestamp()}
 
     def candles(self, symbol):
         return self.candles_by_symbol.get(symbol, [])
@@ -90,3 +94,8 @@ def test_sell_breakout_requires_bearish_trend_and_below_vwap():
     result = collect_candidates(universe(), feed, TODAY)
     assert len(result) == 1
     assert result[0]["side"] == "SELL"
+
+
+def test_rejects_boolean_quote_price():
+    feed = FakeFeed({"STOCK00": True}, {"STOCK00": bars()})
+    assert collect_candidates(universe(), feed, TODAY) == []
