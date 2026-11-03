@@ -199,17 +199,34 @@ class AngelWebSocketFeed:
         self._last_day_volume[symbol] = cumulative
         current["volume"] += max(0, delta)
 
-    def last(self, symbol, now=None):
-        """Fresh LTP in rupees, or None when disconnected/stale."""
+    def quote(self, symbol, now=None):
+        """Return timestamped quote evidence only while connected and both clocks are fresh."""
         name = base_name(symbol)
         with self._lock:
+            if not self.connected:
+                return None
             quote = self.latest.get(name)
             if quote is None:
                 return None
-            age = self._clock() - quote["received_at"]
-            if age < 0 or age > self.max_stale_seconds:
+            current = self._clock() if now is None else (
+                now.timestamp() if isinstance(now, datetime) else float(now)
+            )
+            receive_age = current - quote["received_at"]
+            exchange_age = current - quote["event_time"].timestamp()
+            if (receive_age < 0 or receive_age > self.max_stale_seconds
+                    or exchange_age < -5 or exchange_age > self.max_stale_seconds):
                 return None
-            return quote["price"]
+            return {
+                "symbol": quote["symbol"],
+                "price": quote["price"],
+                "event_time": quote["event_time"],
+                "received_at": quote["received_at"],
+            }
+
+    def last(self, symbol, now=None):
+        """Fresh LTP in rupees, or None when disconnected/stale."""
+        evidence = self.quote(symbol, now)
+        return evidence["price"] if evidence is not None else None
 
     def candles(self, symbol):
         """Completed current-session 5m OHLCV candles; excludes the forming candle."""
