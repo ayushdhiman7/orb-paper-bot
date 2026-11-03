@@ -309,7 +309,9 @@ def test_manual_exit_request_closes_matching_paper_position_at_fresh_price(monke
     state = bot.State(positions={"TCS.NS": pos})
     fake = _ManualExitSB([{"id": 8, "trade_id": 55}])
     monkeypatch.setattr(bot, "SB", fake)
-    monkeypatch.setattr(bot, "last_price", lambda _symbol: 101.25)
+    class _FreshFeed:
+        def last(self, _symbol, now): return 101.25
+    monkeypatch.setattr(bot, "FEED", _FreshFeed())
     closed = []
     def close(st, symbol, price, reason, now):
         closed.append((symbol, price, reason))
@@ -326,8 +328,10 @@ def test_manual_exit_request_stays_pending_without_fresh_price(monkeypatch):
     state = bot.State(positions={"TCS.NS": pos})
     fake = _ManualExitSB([{"id": 8, "trade_id": 55}])
     monkeypatch.setattr(bot, "SB", fake)
-    monkeypatch.setattr(bot, "last_price", lambda _symbol: None)
-    monkeypatch.setattr(bot, "close_position", lambda *_args: pytest.fail("must not close without a fresh quote"))
+    class _StaleFeed:
+        def last(self, _symbol, now): return None
+    monkeypatch.setattr(bot, "FEED", _StaleFeed())
+    monkeypatch.setattr(bot, "close_position", lambda *_args: pytest.fail("must not close without a fresh Angel One quote"))
     bot.process_manual_exit_requests(state, NOW)
     assert "TCS.NS" in state.positions
     assert fake.updates == []
