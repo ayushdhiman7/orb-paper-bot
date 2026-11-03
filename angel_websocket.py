@@ -23,9 +23,23 @@ CORRELATION_ID = "orbphase1"
 
 class AngelWebSocketFeed:
     def __init__(self, symbols, api=None, websocket_factory=None, clock=time.time,
-                 max_stale_seconds=45):
-        self.symbols = [base_name(s) for s in symbols if base_name(s) in TOKENS]
-        self.token_to_symbol = {TOKENS[s]: s for s in self.symbols}
+                 max_stale_seconds=45, token_map=None):
+        # A validated dynamic Nifty 50 token map may be injected by the universe loader.
+        # The legacy five-symbol map remains the default until runtime integration is approved.
+        available_tokens = token_map if token_map is not None else TOKENS
+        if not isinstance(available_tokens, dict) or not available_tokens:
+            raise ValueError("token_map must be a non-empty symbol-to-token mapping")
+        normalized = {base_name(k): str(v).strip() for k, v in available_tokens.items()}
+        if any(not symbol or not token.isdigit() for symbol, token in normalized.items()):
+            raise ValueError("token_map contains an invalid symbol or token")
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("token_map contains duplicate instrument tokens")
+        requested = [base_name(s) for s in symbols]
+        unknown = [s for s in requested if s not in normalized]
+        if unknown:
+            raise ValueError("symbols missing from token_map: " + ", ".join(sorted(set(unknown))))
+        self.symbols = requested
+        self.token_to_symbol = {normalized[s]: s for s in self.symbols}
         self._api = api
         self._websocket_factory = websocket_factory
         self._clock = clock
