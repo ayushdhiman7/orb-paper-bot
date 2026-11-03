@@ -4,6 +4,8 @@ This branch combines the deterministic Nifty 50 universe resolver and candidate 
 with the existing batch-entry parser and deterministic paper-risk contract.
 
 ## Included
+- Single-request Gemini batch transport through the existing durable quota and append-only audit gates; exact candidate coverage is required and failures return no usable decision.
+- Final paper execution sizing helper that rechecks a fresh portfolio snapshot and recomputes quantity after adverse slippage and entry fees; it produces a plan only and does not persist or submit orders.
 - Nifty 50 universe/token resolver and WebSocket adapter from the parent branch.
 - Deterministic 50-stock ORB candidate collector.
 - Exact-coverage BUY/SELL/SKIP batch response parser.
@@ -16,20 +18,13 @@ with the existing batch-entry parser and deterministic paper-risk contract.
    stale/replayed packet could still be treated as current.
 2. The WebSocket subscription currently sends all 50 tokens in one request. Account/API
    subscription limits and heartbeat/reconnect behaviour have not been verified.
-3. The candidate collector delegates quote freshness to the feed adapter and accepts a
-   float-only quote interface. Runtime integration must require a healthy feed and
-   timestamped, fresh quote evidence for every candidate.
-4. The batch sizing contract does not include slippage, brokerage, taxes or other costs.
-   Runtime must recompute quantity and affordability using the existing paper fill/cost
-   implementation immediately before persistence.
-5. The batch validator's positive-number helper currently coerces booleans to 1.0.
-   Harden numeric input validation before using AI output at runtime.
+3. Candidate collection now requires timestamped quote evidence (`event_time` and `received_at`) and rejects disconnected/stale evidence through the WebSocket adapter. Actual-account feed behaviour still needs validation.
+4. The AI batch validator still provides preliminary sizing only. The new final execution helper recomputes quantity using adverse slippage and entry fees, and rechecks portfolio limits. It must be wired to a fresh state snapshot in the bot loop before persistence.
+5. Actual Angel One SNAP_QUOTE access, 50-token subscription behaviour, heartbeat and reconnect handling still require testing with the user's account.
 
 ## Integration gates
-- Add a single Gemini request for the entire candidate batch, using the durable quota and
-  append-only audit layer. Invalid, unavailable, quota-blocked or unauditable output must
-  result in zero entries for that batch.
-- Re-read portfolio state immediately before each paper entry and enforce limits again.
+- Gemini batch transport is implemented and covered by tests. Invalid, unavailable, quota-blocked or unauditable output returns no usable batch.
+- Re-read portfolio state immediately before each paper entry, recompute slippage/fees/sizing, and enforce limits again. The sizing helper exists but is not yet wired into bot.py.
 - Do not fall through to the legacy per-symbol entry path if the batch AI stage fails.
 - Include confidence, rationale, evidence and deterministic risk verdict in Telegram.
 - Keep all broker order endpoints out of the implementation.
