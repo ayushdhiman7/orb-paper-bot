@@ -45,6 +45,8 @@ def test_parser_requires_complete_exact_batch():
     [_decision(), _decision()],
     [{**_decision(), "symbol": "UNKNOWN"}],
     [{**_decision(), "confidence": float("nan")}],
+    [{**_decision(), "confidence": True}],
+    [{**_decision(), "stop": True}],
     [{**_decision(), "rank": True}],
     [{**_decision(), "stop": None}],
     [{**_decision(), "decision": "HOLD"}],
