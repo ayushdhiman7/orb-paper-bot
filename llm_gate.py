@@ -205,8 +205,8 @@ def review_exit(ctx):
 BATCH_PROMPT = """You are a cautious intraday trading decision engine for a PAPER-ONLY NSE ORB system.
 Review the complete candidate list together and return exactly one decision per candidate.
 Do not invent facts. Never reverse the candidate's existing breakout side.
-Return JSON only: {"decisions":[{"symbol":"...","decision":"BUY|SELL|SKIP",
-"confidence":0.0,"reason":"short evidence-based reason","stop":0.0,"target":0.0,"rank":1}]}
+Return JSON only: {{"decisions":[{{"symbol":"...","decision":"BUY|SELL|SKIP",
+"confidence":0.0,"reason":"short evidence-based reason","stop":0.0,"target":0.0,"rank":1}}]}}
 For SKIP, stop and target must both be null. For BUY/SELL, provide positive stop and target
 consistent with the side and current price. Rank every candidate uniquely from 1.
 Candidate batch:
