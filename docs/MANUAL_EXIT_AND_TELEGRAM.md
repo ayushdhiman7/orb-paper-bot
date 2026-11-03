@@ -20,7 +20,7 @@ until it next runs during market hours.
 Apply `supabase/migrations/202611030001_manual_exit_requests.sql` to the same
 Supabase project used by the bot and dashboard API.
 
-Add a long, random secret to the existing EC2 bot `.env` file:
+Generate a strong token (for example, `openssl rand -hex 32`) and add it to the existing EC2 bot `.env` file:
 
 ```dotenv
 DASHBOARD_CONTROL_TOKEN=<long-random-secret>
