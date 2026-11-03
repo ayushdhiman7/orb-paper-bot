@@ -8,7 +8,7 @@ import {
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { loadDashboardData } from "./lib/supabase";
+import { loadDashboardData, requestManualExit } from "./lib/supabase";
 import type { BacktestRun, ControlTrade, DashboardRange, PaperTrade } from "./lib/supabase";
 
 type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor";
@@ -28,6 +28,9 @@ function App() {
   const [activeRange, setActiveRange] = useState<DashboardRange>("7D");
   const [mobileNav, setMobileNav] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
+  const [manualExitStatus, setManualExitStatus] = useState<Record<string, string>>({});
+  const [manualExitTrade, setManualExitTrade] = useState<PaperTrade | null>(null);
+  const [manualExitToken, setManualExitToken] = useState("");
 
   const refresh = useCallback(async (range: DashboardRange) => {
     const currentRequest = ++requestId.current;
@@ -73,6 +76,27 @@ function App() {
     return () => source.close();
   }, [refresh, activeRange]);
 
+  const handleManualExit = useCallback((trade: PaperTrade) => {
+    const symbol = trade.symbol.replace(".NS", "");
+    if (!window.confirm("Request a manual paper exit for " + symbol + "? The bot will close it at the next fresh market price. This does not send a broker order.")) return;
+    setManualExitToken("");
+    setManualExitTrade(trade);
+  }, []);
+
+  const submitManualExit = useCallback(async () => {
+    if (!manualExitTrade || !manualExitToken.trim()) return;
+    const key = String(manualExitTrade.id);
+    setManualExitStatus(current => ({ ...current, [key]: "Submitting…" }));
+    try {
+      const result = await requestManualExit(manualExitTrade.id, manualExitToken.trim());
+      setManualExitStatus(current => ({ ...current, [key]: "Exit queued · request #" + result.request_id }));
+      setManualExitTrade(null);
+      setManualExitToken("");
+    } catch (e) {
+      setManualExitToken("");
+      setManualExitStatus(current => ({ ...current, [key]: e instanceof Error ? "Failed · " + e.message : "Exit request failed" }));
+    }
+  }, [manualExitTrade, manualExitToken]);
   const closedTrades = data.trades.filter(
     t => t.status !== "open" && t.pnl !== null && !t.exit_estimated,
   );
@@ -154,13 +178,26 @@ function App() {
                 <span><strong>No paper trades found for {activeRange}.</strong> Try another range or refresh the data.</span>
               </div>
             )}
-            {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} unrealizedPnl={unrealizedPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange} openTrades={openTrades}/>}
+            {tab === "Overview" && <Overview trades={closedTrades} totalPnl={totalPnl} unrealizedPnl={unrealizedPnl} matchedAiPnl={matchedAiPnl} winRate={winRate} openCount={openTrades.length} aiSkipped={aiSkipped} equity={equity} controls={matchedControls.length} controlPnl={controlPnl} recentTrades={recentTrades} setTab={setTab} activeRange={activeRange} setActiveRange={setActiveRange} openTrades={openTrades} onManualExit={handleManualExit} manualExitStatus={manualExitStatus}/>}
             {tab === "Trade journal" && <Journal trades={filteredTrades} query={query} setQuery={setQuery} sideFilter={sideFilter} setSideFilter={setSideFilter}/>}
             {tab === "AI vs no-AI" && <AIComparison trades={closedTrades} controls={controlTrades} aiSkipped={aiSkipped}/>}
             {tab === "Backtests" && <ResearchPage runs={data.backtests}/>}
             {tab === "Risk monitor" && <RiskPage trades={closedTrades} openTrades={openTrades} totalPnl={totalPnl}/>}
           </>
         )}
+        {manualExitTrade && <div className="manual-exit-modal-backdrop" role="presentation">
+          <section className="manual-exit-modal" role="dialog" aria-modal="true" aria-labelledby="manual-exit-title">
+            <h2 id="manual-exit-title">Authorize paper exit</h2>
+            <p>Exit {manualExitTrade.symbol.replace(".NS", "")} · trade #{manualExitTrade.id}</p>
+            <label htmlFor="manual-exit-token">Dashboard control token</label>
+            <input id="manual-exit-token" type="password" autoComplete="off" value={manualExitToken} onChange={event => setManualExitToken(event.target.value)} placeholder="Enter control token"/>
+            <small>The bot will close this paper position only after it receives a fresh market price. No broker order is sent.</small>
+            <div className="manual-exit-modal-actions">
+              <button className="button-secondary" onClick={() => { setManualExitTrade(null); setManualExitToken(""); }}>Cancel</button>
+              <button className="manual-exit-button" onClick={() => void submitManualExit()} disabled={!manualExitToken.trim() || manualExitStatus[String(manualExitTrade.id)]?.startsWith("Submitting")}>Confirm exit request</button>
+            </div>
+          </section>
+        </div>}
         <footer className="footer"><span><ShieldCheck size={14}/> Paper trading only · No broker orders</span><span>ORB Terminal <b>v0.1</b> <span className="footer-sep">·</span> Data source: Live API</span></footer>
       </div>
     </main>
@@ -171,7 +208,7 @@ function MetricCard({ label, value, change, positive, icon: Icon, sub }: { label
   return <div className="metric-card"><div className="metric-top"><span>{label}</span><div className="metric-icon"><Icon size={17}/></div></div><div className="metric-value">{value}</div><div className="metric-bottom">{change && <span className={positive ? "change positive" : "change negative"}>{positive ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>} {change}</span>}<span className="metric-sub">{sub}</span></div></div>;
 }
 
-function Overview({ trades, totalPnl, unrealizedPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, recentTrades, setTab, activeRange, setActiveRange, openTrades }: { trades:PaperTrade[]; totalPnl:number; unrealizedPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; recentTrades:PaperTrade[]; setTab:(t:Tab)=>void; activeRange:DashboardRange; setActiveRange:(v:DashboardRange)=>void; openTrades:PaperTrade[] }) {
+function Overview({ trades, totalPnl, unrealizedPnl, matchedAiPnl, winRate, openCount, aiSkipped, equity, controls, controlPnl, recentTrades, setTab, activeRange, setActiveRange, openTrades, onManualExit, manualExitStatus }: { trades:PaperTrade[]; totalPnl:number; unrealizedPnl:number; matchedAiPnl:number; winRate:number; openCount:number; aiSkipped:number; equity:{day:string;pnl:number}[]; controls:number; controlPnl:number; recentTrades:PaperTrade[]; setTab:(t:Tab)=>void; activeRange:DashboardRange; setActiveRange:(v:DashboardRange)=>void; openTrades:PaperTrade[]; onManualExit:(trade:PaperTrade)=>void; manualExitStatus:Record<string,string> }) {
   const combinedPnl = totalPnl + unrealizedPnl;
   return <>
     <div className="section-row"><div><h2>Performance overview</h2><p>Realized results for selected period · current open-position marks shown separately</p></div><div className="range-switch">{(["1D","7D","30D","ALL"] as const).map(x=><button key={x} onClick={()=>setActiveRange(x)} className={activeRange===x?"selected":""}>{x}</button>)}</div></div>
@@ -189,7 +226,7 @@ function Overview({ trades, totalPnl, unrealizedPnl, matchedAiPnl, winRate, open
       <section className="panel equity-panel"><div className="panel-heading"><div><h3>Equity progression</h3><p>Cumulative realized P&amp;L · INR · {activeRange}</p></div><button className="select-chip">Cumulative <ChevronDown size={14}/></button></div><div className="chart-summary"><strong className={totalPnl >= 0 ? "positive-text":"negative-text"}>{preciseMoney(totalPnl)}</strong><span>Realized in selected period</span><span className="chart-legend"><i/> Cumulative P&amp;L</span></div><div className="equity-chart">{equity.length > 1 ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={equity} margin={{top:10,right:8,left:0,bottom:0}}><defs><linearGradient id="pnlFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#9ae6b4" stopOpacity={0.23}/><stop offset="100%" stopColor="#9ae6b4" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid stroke="#242832" strokeDasharray="3 5" vertical={false}/><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:"#777e8e",fontSize:11}}/><YAxis axisLine={false} tickLine={false} tick={{fill:"#777e8e",fontSize:11}} tickFormatter={v=>`₹${v}`} width={54}/><Tooltip contentStyle={{background:"#151821",border:"1px solid #303441",borderRadius:10,color:"#f5f6f8"}} formatter={(v)=>[preciseMoney(Number(v)),"Cumulative P&L"]}/><Area type="monotone" dataKey="pnl" stroke="#9ae6b4" strokeWidth={2.5} fill="url(#pnlFill)" activeDot={{r:4,fill:"#9ae6b4",stroke:"#10130f"}}/></AreaChart></ResponsiveContainer> : <div className="empty-chart"><Activity size={25}/><strong>Not enough history yet</strong><span>More confirmed closed trades will build this chart.</span></div>}</div><div className="chart-foot"><span><i className="tiny-dot green-dot"/> Confirmed realized results only</span><span><Clock3 size={13}/> Updates when data refreshes</span></div></section>
       <section className="panel control-panel"><div className="panel-heading"><div><h3>AI control group</h3><p>AI strategy against no-AI baseline</p></div><div className="control-icon"><Bot size={18}/></div></div><div className="control-callout"><div className="callout-label">NO-AI CONTROL P&amp;L</div><strong className={controlPnl>=0?"positive-text":"negative-text"}>{money(controlPnl)}</strong><span>{controls} completed control trades</span></div><div className="comparison-line"><div><span>AI strategy (matched)</span><strong className={matchedAiPnl>=0?"positive-text":"negative-text"}>{money(matchedAiPnl)}</strong></div><div><span>No-AI control (matched)</span><strong>{money(controlPnl)}</strong></div></div><div className="mini-bar"><span style={{width:`${Math.max(8,Math.min(100,Math.abs(matchedAiPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/><i style={{width:`${Math.max(8,Math.min(100,Math.abs(controlPnl)/(Math.abs(matchedAiPnl)+Math.abs(controlPnl)+1)*100))}%`}}/></div><button className="panel-link" onClick={()=>setTab("AI vs no-AI")}>Explore AI impact <ArrowUpRight size={15}/></button><div className="research-note"><ShieldCheck size={15}/><span>Control results are hypothetical and do not place orders.</span></div></section>
     </div>
-    <section className="panel table-panel open-positions-panel"><div className="panel-heading"><div><h3>Current open positions</h3><p>All active paper positions · current unrealized P&amp;L</p></div><span className="select-chip">{openTrades.length} open</span></div>{openTrades.length ? <TradeTable trades={openTrades}/> : <div className="table-empty">No open paper positions.</div>}</section>
+    <section className="panel table-panel open-positions-panel"><div className="panel-heading"><div><h3>Current open positions</h3><p>All active paper positions · current unrealized P&amp;L</p></div><span className="select-chip">{openTrades.length} open</span></div>{openTrades.length ? <TradeTable trades={openTrades} onManualExit={onManualExit} manualExitStatus={manualExitStatus}/> : <div className="table-empty">No open paper positions.</div>}</section>
     <section className="panel table-panel"><div className="panel-heading"><div><h3>Recent trades</h3><p>Your latest simulated executions</p></div><button className="panel-link" onClick={()=>setTab("Trade journal")}>View journal <ArrowUpRight size={15}/></button></div><TradeTable trades={recentTrades}/></section>
     <div className="bottom-grid"><section className="panel insight-panel"><div className="panel-heading"><div><h3>Strategy signals</h3><p>Quick read from your current sample</p></div><Sparkles size={17} className="muted-icon"/></div><div className="insight-row"><div className="insight-symbol"><Bot size={16}/></div><div className="insight-copy"><strong>AI decisions recorded</strong><span>{aiSkipped} skip decisions across visible trades</span></div><span className="insight-value">{trades.length ? `${Math.round(aiSkipped/Math.max(1,trades.length)*100)}%` : "—"}</span></div><div className="insight-row"><div className="insight-symbol"><Activity size={16}/></div><div className="insight-copy"><strong>Control group coverage</strong><span>Completed no-AI outcomes stored</span></div><span className="insight-value">{controls}</span></div></section><section className="panel quick-panel"><div className="panel-heading"><div><h3>Workspace status</h3><p>Data & execution safety</p></div><CheckCircle2 size={17} className="positive-text"/></div><div className="status-row"><span>Execution environment</span><strong><i className="tiny-dot green-dot"/> Paper only</strong></div><div className="status-row"><span>Dashboard data</span><strong>Live API</strong></div><div className="status-row"><span>Broker order routing</span><strong>Disabled</strong></div></section></div>
   </>;
@@ -205,7 +242,7 @@ function getTradePnl(t: PaperTrade): { value: number | null; kind: "realized" | 
   return { value: Number(t.pnl), kind: "realized" };
 }
 
-function TradeTable({ trades }: { trades:PaperTrade[] }) {
+function TradeTable({ trades, onManualExit, manualExitStatus = {} }: { trades:PaperTrade[]; onManualExit?:(trade:PaperTrade)=>void; manualExitStatus?:Record<string,string> }) {
   if (!trades.length) return <div className="table-empty">No matching trades found.</div>;
   return <><div className="trade-cards">{trades.map(t=>{
     const name=t.symbol.replace(".NS","");
@@ -224,10 +261,12 @@ function TradeTable({ trades }: { trades:PaperTrade[] }) {
       <div className="trade-card-tags">
         <span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>AI: {t.llm_decision ?? "—"}</span>
         {t.exit_estimated && <span className="est-tag" title="Exit price was reconstructed, not observed. Excluded from confirmed P&L.">estimated exit</span>}
-        {open && <span className="mark-tag">unrealised · last {Number(t.last_price).toFixed(2)}</span>}{tradePnl.kind === "estimated" && <span className="est-tag">estimated · excluded from realised P&L</span>}
+        {open && <span className="mark-tag">unrealised · last {Number(t.last_price).toFixed(2)}</span>}
+        {open && onManualExit && <button className="manual-exit-button" onClick={() => onManualExit(t)} disabled={manualExitStatus[String(t.id)]?.startsWith("Submitting") || manualExitStatus[String(t.id)]?.startsWith("Exit queued")}><X size={13}/> {manualExitStatus[String(t.id)]?.startsWith("Exit queued") ? "Exit queued" : "Exit trade"}</button>}
+        {manualExitStatus[String(t.id)] && <span className="manual-exit-status">{manualExitStatus[String(t.id)]}</span>}{tradePnl.kind === "estimated" && <span className="est-tag">estimated · excluded from realised P&L</span>}
       </div>
     </article>;
-  })}</div><div className="table-scroll"><table><thead><tr><th>Trade / symbol</th><th>Side</th><th>Entry → exit</th><th>Exit reason</th><th>AI decision</th><th>Net P&L</th><th>Timestamp</th></tr></thead><tbody>{trades.map(t=>{ const tradePnl = getTradePnl(t); const pnl = tradePnl.value; return <tr key={t.id}><td><div className="symbol-cell"><span className="symbol-icon">{t.symbol.replace(".NS","").slice(0,2)}</span><div><strong>{t.symbol.replace(".NS","")}</strong><small>#{t.id}</small></div></div></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span></td><td><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit == null ? "Open" : Number(t.exit).toFixed(2)}</span></td><td><span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).replaceAll("_"," ")}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision ?? "—"}</span></td><td className={pnl==null?"":pnl>=0?"positive-text":"negative-text"}>{pnl == null ? "—" : <>{preciseMoney(pnl)}{tradePnl.kind==="unrealized" && <small className="pnl-kind">Unrealized</small>}{tradePnl.kind==="estimated" && <small className="pnl-kind">Estimated · excluded</small>}</>}</td><td className="date-cell">{formatDate(t.ts)}</td></tr>; })}</tbody></table></div></>;
+  })}</div><div className="table-scroll"><table><thead><tr><th>Trade / symbol</th><th>Side</th><th>Entry → exit</th><th>Exit reason</th><th>AI decision</th><th>Net P&L</th><th>Timestamp</th><th>Action</th></tr></thead><tbody>{trades.map(t=>{ const tradePnl = getTradePnl(t); const pnl = tradePnl.value; return <tr key={t.id}><td><div className="symbol-cell"><span className="symbol-icon">{t.symbol.replace(".NS","").slice(0,2)}</span><div><strong>{t.symbol.replace(".NS","")}</strong><small>#{t.id}</small></div></div></td><td><span className={`side-tag ${t.side==="BUY"?"buy":"sell"}`}>{t.side}</span></td><td><span className="price-pair">{t.entry.toFixed(2)} <span>→</span> {t.exit == null ? "Open" : Number(t.exit).toFixed(2)}</span></td><td><span className="reason-text">{(t.reason ?? (t.status==="open"?"Open position":"—")).replaceAll("_"," ")}</span></td><td><span className={`ai-tag ${t.llm_decision==="take"?"ai-take":t.llm_decision==="skip"?"ai-skip":"ai-na"}`}>{t.llm_decision ?? "—"}</span></td><td className={pnl==null?"":pnl>=0?"positive-text":"negative-text"}>{pnl == null ? "—" : <>{preciseMoney(pnl)}{tradePnl.kind==="unrealized" && <small className="pnl-kind">Unrealized</small>}{tradePnl.kind==="estimated" && <small className="pnl-kind">Estimated · excluded</small>}</>}</td><td className="date-cell">{formatDate(t.ts)}</td><td>{tradePnl.kind === "unrealized" && onManualExit && <button className="manual-exit-button" onClick={() => onManualExit(t)} disabled={manualExitStatus[String(t.id)]?.startsWith("Submitting") || manualExitStatus[String(t.id)]?.startsWith("Exit queued")}>{manualExitStatus[String(t.id)]?.startsWith("Exit queued") ? "Exit queued" : "Exit trade"}</button>}{manualExitStatus[String(t.id)] && <small className="manual-exit-status">{manualExitStatus[String(t.id)]}</small>}</td></tr>; })}</tbody></table></div></>;
 }
 
 function Journal({ trades, query, setQuery, sideFilter, setSideFilter }: { trades:PaperTrade[]; query:string; setQuery:(v:string)=>void; sideFilter:string; setSideFilter:(v:string)=>void }) {

@@ -63,3 +63,12 @@ def test_watchdog_alerts_once_then_reports_recovery():
     assert len(watchdog.diff_alerts({}, cur)) == 1
     assert watchdog.diff_alerts(cur, cur) == []
     assert watchdog.diff_alerts(cur, {})[0].startswith("RESOLVED")
+
+
+def test_telegram_messages_get_category_emojis():
+    assert notify.format_message("ENTRY BUY 2 TCS.NS") == "🟢 ENTRY BUY 2 TCS.NS"
+    assert notify.format_message("ENTRY SELL 1 INFY.NS") == "🔴 ENTRY SELL 1 INFY.NS"
+    assert notify.format_message("EXIT TCS.NS @ 100.00") == "🚪 EXIT TCS.NS @ 100.00"
+    assert notify.format_message("HALT: daily loss cap hit") == "🛑 HALT: daily loss cap hit"
+    assert notify.format_message("Paper bot started") == "🚀 Paper bot started"
+    assert notify.format_message("🟢 already labelled") == "🟢 already labelled"

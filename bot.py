@@ -419,6 +419,50 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
     return True
 
 
+
+
+def process_manual_exit_requests(state: State, now: datetime):
+    """Execute dashboard requests only for open paper positions and only at a fresh mark."""
+    if SB is None:
+        return
+    try:
+        requests = (SB.table("manual_exit_requests").select("id,trade_id")
+                    .eq("status", "pending").order("requested_at").limit(20).execute().data or [])
+    except Exception as exc:
+        print(f"[warn] manual-exit queue read failed ({type(exc).__name__})")
+        return
+
+    for request in requests:
+        request_id, trade_id = request["id"], request["trade_id"]
+        symbol = next((s for s, p in state.positions.items() if str(p.row_id) == str(trade_id)), None)
+        if symbol is None:
+            # A prior close may have succeeded before the command status update.
+            try:
+                trade = (SB.table("paper_trades").select("status,reason")
+                         .eq("id", trade_id).limit(1).execute().data or [])
+                status = "executed" if trade and trade[0].get("status") == "closed" and trade[0].get("reason") == "manual_exit" else "rejected"
+                reason = "already_closed" if status == "executed" else "position_not_open"
+                SB.table("manual_exit_requests").update({"status": status, "processed_at": now.isoformat(),
+                    "result_reason": reason}).eq("id", request_id).eq("status", "pending").execute()
+            except Exception as exc:
+                print(f"[warn] manual-exit request reconciliation failed ({type(exc).__name__})")
+            continue
+
+        # Manual exits must never use Yahoo fallback: its delayed candles are not
+        # suitable for an operator-triggered close. Require a fresh Angel One tick.
+        price = FEED.last(symbol, now) if FEED is not None else None
+        if not _valid_price(price):
+            print(f"[warn] manual exit pending for {symbol}: no fresh Angel One quote")
+            continue
+        if close_position(state, symbol, price, "manual_exit", now):
+            try:
+                SB.table("manual_exit_requests").update({"status": "executed", "processed_at": now.isoformat(),
+                    "result_reason": "closed_at_fresh_market_price"}).eq("id", request_id).eq("status", "pending").execute()
+                notify.send(f"✅ MANUAL EXIT CONFIRMED {symbol} @ {price:.2f} | paper trade closed")
+            except Exception as exc:
+                # The trade row is authoritative; next pass reconciles this request as already closed.
+                print(f"[warn] manual-exit status update deferred ({type(exc).__name__})")
+
 def manage_positions(state: State, now: datetime):
     for symbol in list(state.positions):
         pos = state.positions[symbol]
@@ -674,6 +718,8 @@ def run():
                 print(f"[HALT] Unresolved real/control position(s) after market close: {', '.join(unresolved)}. State retained; manual reconciliation required.")
             time.sleep(30 if FEED is not None and t < MARKET_OPEN and now.weekday() < 5 else 300)
             continue
+
+        process_manual_exit_requests(state, now)
 
         if t >= SQUARE_OFF:
             for sym in list(state.positions):

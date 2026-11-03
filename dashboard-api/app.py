@@ -59,7 +59,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -319,6 +319,48 @@ async def stream_events(request: Request, after: int = Query(default=0, ge=0)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+
+def _dashboard_control_token() -> str:
+    return os.getenv("DASHBOARD_CONTROL_TOKEN", "").strip()
+
+
+def _create_manual_exit_request(trade_id: int) -> dict:
+    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    trade = (client.table("paper_trades").select("id,status,mode,symbol")
+             .eq("id", trade_id).limit(1).execute().data or [])
+    if not trade or trade[0].get("status") != "open" or trade[0].get("mode") != "paper":
+        raise HTTPException(status_code=409, detail="This paper position is no longer open")
+    pending = (client.table("manual_exit_requests").select("id,status")
+               .eq("trade_id", trade_id).eq("status", "pending").limit(1).execute().data or [])
+    if pending:
+        return {"request_id": pending[0]["id"], "request_status": "pending", "symbol": trade[0]["symbol"]}
+    created = (client.table("manual_exit_requests").insert({"trade_id": trade_id, "status": "pending"})
+               .select("id,status").execute().data or [])
+    if not created:
+        raise RuntimeError("Manual exit request was not persisted")
+    return {"request_id": created[0]["id"], "request_status": created[0]["status"], "symbol": trade[0]["symbol"]}
+
+
+@app.post("/api/paper-trades/{trade_id}/manual-exit")
+async def request_manual_exit(trade_id: int, request: Request):
+    expected = _dashboard_control_token()
+    supplied = request.headers.get("Authorization", "")
+    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:], expected):
+        raise HTTPException(status_code=401, detail="Manual exit authorization failed")
+    if trade_id <= 0:
+        raise HTTPException(status_code=422, detail="Invalid trade ID")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+    try:
+        result = await run_in_threadpool(_create_manual_exit_request, trade_id)
+        return {"status": "accepted", **result}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unable to queue manual paper exit trade_id=%s", trade_id)
+        raise HTTPException(status_code=502, detail="Unable to queue manual exit")
 
 @app.get("/health")
 def health():

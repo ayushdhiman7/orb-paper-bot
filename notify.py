@@ -10,6 +10,27 @@ TIMEOUT_SECONDS = 4
 _SENT = set()
 
 
+def format_message(message):
+    """Add a consistent Telegram emoji to known lifecycle and safety alerts."""
+    text = str(message)
+    if text.startswith(("🚀", "📈", "📉", "🟢", "🔴", "🚪", "✅", "⚠️", "🛑", "🔔")):
+        return text
+    prefixes = (
+        ("Paper bot started", "🚀"),
+        ("ENTRY BUY", "🟢"),
+        ("ENTRY SELL", "🔴"),
+        ("EXIT ", "🚪"),
+        ("HALT:", "🛑"),
+        ("RESOLVED", "✅"),
+        ("[AI-", "🤖"),
+        ("RISK", "⚠️"),
+    )
+    for prefix, emoji in prefixes:
+        if text.startswith(prefix):
+            return f"{emoji} {text}"
+    return f"🔔 {text}"
+
+
 def configured():
     return bool(os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHAT_ID", "").strip())
 
@@ -26,7 +47,7 @@ def send(text, once_key=None):
     try:
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data=json.dumps({"chat_id": chat, "text": str(text)[:3500]}).encode(),
+            data=json.dumps({"chat_id": chat, "text": format_message(text)[:3500]}).encode(),
             headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS).read()
         return True

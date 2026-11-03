@@ -236,3 +236,65 @@ def test_sse_reconnect_resumes_from_last_event_id(monkeypatch):
     assert "event: ready" not in body
     assert "id: 5\nevent: trade.closed" in body
     assert client.query.filters == [("id", 4)]
+
+
+def test_manual_exit_endpoint_requires_control_token(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_CONTROL_TOKEN", "expected-control-token")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    request, _, _, _ = make_request({})
+    request.scope["headers"].append((b"authorization", b"Bearer wrong-token"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dashboard_api.request_manual_exit(12, request))
+    assert error.value.status_code == 401
+
+
+def test_manual_exit_endpoint_fails_closed_when_control_token_is_unset(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_CONTROL_TOKEN", raising=False)
+    request, _, _, _ = make_request({})
+    request.scope["headers"].append((b"authorization", b"Bearer anything"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dashboard_api.request_manual_exit(12, request))
+    assert error.value.status_code == 401
+
+
+class ManualExitFakeQuery:
+    def __init__(self, table, rows):
+        self.table = table
+        self.rows = rows
+        self.inserted = None
+    def select(self, *_args): return self
+    def eq(self, *_args): return self
+    def limit(self, *_args): return self
+    def insert(self, values):
+        self.inserted = values
+        self.table.inserted.append(values)
+        return self
+    def execute(self):
+        return type("Response", (), {"data": self.rows})()
+
+
+class ManualExitFakeClient:
+    def __init__(self):
+        self.inserted = []
+        self.trade_query = ManualExitFakeQuery(self, [{"id": 12, "status": "open", "mode": "paper", "symbol": "TCS.NS"}])
+        self.pending_query = ManualExitFakeQuery(self, [])
+        self.insert_query = ManualExitFakeQuery(self, [{"id": 91, "status": "pending"}])
+        self.calls = 0
+    def table(self, name):
+        if name == "paper_trades": return self.trade_query
+        self.calls += 1
+        return self.pending_query if self.calls == 1 else self.insert_query
+
+
+def test_manual_exit_endpoint_queues_only_authorized_open_paper_trade(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_CONTROL_TOKEN", "expected-control-token")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    client = ManualExitFakeClient()
+    monkeypatch.setattr(dashboard_api, "create_client", lambda *_args: client)
+    request, _, _, _ = make_request({})
+    request.scope["headers"].append((b"authorization", b"Bearer expected-control-token"))
+    result = asyncio.run(dashboard_api.request_manual_exit(12, request))
+    assert result == {"status": "accepted", "request_id": 91, "request_status": "pending", "symbol": "TCS.NS"}
+    assert client.inserted == [{"trade_id": 12, "status": "pending"}]
