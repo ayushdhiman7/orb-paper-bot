@@ -116,7 +116,7 @@ def test_daily_loss_and_confidence_fail_closed():
 def test_missing_or_duplicate_decisions_rejected_as_whole_batch():
     with pytest.raises(ValueError, match="exactly once"):
         validate_batch([_candidate()], [], _limits())
-    with pytest.raises(ValueError, match="exactly once"):
+    with pytest.raises(ValueError, match="unique"):
         validate_batch([_candidate()], [_decision(), _decision()], _limits())
 
 
