@@ -236,3 +236,23 @@ def test_sse_reconnect_resumes_from_last_event_id(monkeypatch):
     assert "event: ready" not in body
     assert "id: 5\nevent: trade.closed" in body
     assert client.query.filters == [("id", 4)]
+
+
+def test_manual_exit_endpoint_requires_control_token(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_CONTROL_TOKEN", "expected-control-token")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    request, _, _, _ = make_request({})
+    request.scope["headers"].append((b"authorization", b"Bearer wrong-token"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dashboard_api.request_manual_exit(12, request))
+    assert error.value.status_code == 401
+
+
+def test_manual_exit_endpoint_fails_closed_when_control_token_is_unset(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_CONTROL_TOKEN", raising=False)
+    request, _, _, _ = make_request({})
+    request.scope["headers"].append((b"authorization", b"Bearer anything"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dashboard_api.request_manual_exit(12, request))
+    assert error.value.status_code == 401
