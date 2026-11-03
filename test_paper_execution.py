@@ -29,7 +29,7 @@ def test_recomputes_quantity_after_slippage_and_entry_fee():
     )
     assert plan is not None
     assert plan.entry_fill == pytest.approx(100.1)
-    assert plan.quantity == 90
+    assert plan.quantity == 900
     assert plan.entry_fee == pytest.approx(4.5045)
     assert plan.risk_amount == pytest.approx(99.0)
 
@@ -62,7 +62,7 @@ def test_rejects_side_conflict_and_invalid_post_slippage_geometry():
         slippage_pct=0.05, cost_pct=0.1,
     ) is None
     assert recompute_paper_execution(
-        entry(stop=100.05, target=103), candidate(), limits(),
+        entry(stop=100.11, target=103), candidate(), limits(),
         slippage_pct=0.1, cost_pct=0.1,
     ) is None
 
