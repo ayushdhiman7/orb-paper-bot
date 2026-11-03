@@ -83,3 +83,18 @@ def test_session_rollover_clears_previous_session_bars():
     p["exchange_timestamp"] = p["last_traded_timestamp"]
     feed._on_data(None, p)
     assert feed.candles("RELIANCE.NS") == []
+
+
+def test_dynamic_token_map_supports_validated_50_symbol_universe():
+    token_map = {f"STOCK{i:02d}": str(1000 + i) for i in range(50)}
+    feed = AngelWebSocketFeed(list(token_map), token_map=token_map)
+    assert len(feed.symbols) == 50
+    assert feed.token_to_symbol["1049"] == "STOCK49"
+
+
+def test_dynamic_token_map_rejects_missing_and_duplicate_tokens():
+    token_map = {"AAA": "100", "BBB": "100"}
+    with pytest.raises(ValueError, match="duplicate"):
+        AngelWebSocketFeed(["AAA", "BBB"], token_map=token_map)
+    with pytest.raises(ValueError, match="missing"):
+        AngelWebSocketFeed(["AAA", "CCC"], token_map={"AAA": "100"})
