@@ -66,7 +66,7 @@ def test_collects_aligned_breakout_candidates_as_one_batch():
 def test_skips_missing_quote_incomplete_opening_range_and_neutral_price():
     u = universe()
     feed = FakeFeed(
-        {"STOCK00": 104.0, "STOCK01": 115.0, "STOCK02": 101.0},
+        {"STOCK00": 115.0, "STOCK02": 101.0},
         {"STOCK00": bars()[:2], "STOCK01": bars(), "STOCK02": bars()},
     )
     result = collect_candidates(u, feed, TODAY)
