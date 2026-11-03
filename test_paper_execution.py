@@ -29,9 +29,9 @@ def test_recomputes_quantity_after_slippage_and_entry_fee():
     )
     assert plan is not None
     assert plan.entry_fill == pytest.approx(100.1)
-    assert plan.quantity == 9
-    assert plan.entry_fee == pytest.approx(0.45045)
-    assert plan.risk_amount == pytest.approx(9.9)
+    assert plan.quantity == 90
+    assert plan.entry_fee == pytest.approx(4.5045)
+    assert plan.risk_amount == pytest.approx(99.0)
 
 
 def test_sell_execution_uses_adverse_slippage_and_geometry():
