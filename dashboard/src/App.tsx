@@ -93,6 +93,7 @@ function App() {
       setManualExitTrade(null);
       setManualExitToken("");
     } catch (e) {
+      setManualExitToken("");
       setManualExitStatus(current => ({ ...current, [key]: e instanceof Error ? "Failed · " + e.message : "Exit request failed" }));
     }
   }, [manualExitTrade, manualExitToken]);
