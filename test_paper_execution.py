@@ -84,3 +84,10 @@ def test_never_trusts_preliminary_ai_quantity():
         proposed, candidate(), limits(), slippage_pct=0.05, cost_pct=0.1
     )
     assert plan.quantity < 999999
+
+
+def test_malformed_fresh_portfolio_snapshot_fails_closed():
+    assert recompute_paper_execution(
+        entry(), candidate(), limits(open_positions=True),
+        slippage_pct=0.05, cost_pct=0.1,
+    ) is None
