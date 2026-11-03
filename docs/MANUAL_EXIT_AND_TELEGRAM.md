@@ -8,8 +8,10 @@ validates the token and queues a row in `manual_exit_requests`. It does not clos
 the trade itself and does not call a broker.
 
 During NSE market hours, the bot reads pending requests and matches the requested
-paper-trade ID to its restored in-memory position. It requires a fresh, valid quote,
-then uses the existing `close_position` path so adverse slippage, fees, Supabase
+paper-trade ID to its restored in-memory position. It requires a fresh, valid Angel One WebSocket/quote-feed tick (maximum age 45 seconds).
+It deliberately does not use the bot's Yahoo fallback for manual exits because those
+candles can be delayed. If Angel One is unavailable, the request remains pending.
+It then uses the existing `close_position` path so adverse slippage, fees, Supabase
 trade persistence, shadow-ledger handling and dashboard lifecycle events remain
 consistent. A request with no fresh quote remains pending. A request for a trade
 that is no longer open is rejected. If the bot is stopped, requests remain pending
@@ -43,6 +45,7 @@ change the underlying alert text or trading decisions.
 - Paper positions only; no broker order API is called.
 - Manual exit requires a confirmation click and server-side bearer-token check.
 - Bot is the only component that executes a close.
-- The bot requires a fresh market price and preserves existing fees/slippage.
+- Manual exits require a fresh Angel One quote (45-second maximum age); Yahoo fallback is not accepted.
+- Existing fees/slippage are preserved.
 - This feature does not deploy itself. Apply the database migration and configure
   the secret as a separately approved deployment step.
