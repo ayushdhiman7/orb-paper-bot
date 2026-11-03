@@ -94,3 +94,8 @@ def test_sell_breakout_requires_bearish_trend_and_below_vwap():
     result = collect_candidates(universe(), feed, TODAY)
     assert len(result) == 1
     assert result[0]["side"] == "SELL"
+
+
+def test_rejects_boolean_quote_price():
+    feed = FakeFeed({"STOCK00": True}, {"STOCK00": bars()})
+    assert collect_candidates(universe(), feed, TODAY) == []
