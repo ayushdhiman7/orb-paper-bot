@@ -448,9 +448,11 @@ def process_manual_exit_requests(state: State, now: datetime):
                 print(f"[warn] manual-exit request reconciliation failed ({type(exc).__name__})")
             continue
 
-        price = last_price(symbol)
-        if price is None:
-            print(f"[warn] manual exit pending for {symbol}: no fresh market price")
+        # Manual exits must never use Yahoo fallback: its delayed candles are not
+        # suitable for an operator-triggered close. Require a fresh Angel One tick.
+        price = FEED.last(symbol, now) if FEED is not None else None
+        if not _valid_price(price):
+            print(f"[warn] manual exit pending for {symbol}: no fresh Angel One quote")
             continue
         if close_position(state, symbol, price, "manual_exit", now):
             try:
