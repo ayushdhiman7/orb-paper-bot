@@ -242,3 +242,5 @@ button,select,input,a{touch-action:manipulation}
   .pnl-summary-breakdown{width:100%;justify-content:space-between;gap:12px}
   .pnl-summary-breakdown strong{font-size:14px}
 }
+
+.manual-exit-button{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:7px 10px;border:1px solid #71343b;border-radius:7px;background:#351b22;color:#ffb0b0;font-size:10px;font-weight:700}.manual-exit-button:hover{background:#48212a;border-color:#a64a55}.manual-exit-button:disabled{opacity:.55;cursor:wait}.manual-exit-status{display:block;margin-top:6px;color:#b8a4ff;font-size:9px;overflow-wrap:anywhere}
