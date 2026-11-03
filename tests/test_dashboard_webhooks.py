@@ -296,5 +296,5 @@ def test_manual_exit_endpoint_queues_only_authorized_open_paper_trade(monkeypatc
     request, _, _, _ = make_request({})
     request.scope["headers"].append((b"authorization", b"Bearer expected-control-token"))
     result = asyncio.run(dashboard_api.request_manual_exit(12, request))
-    assert result == {"status": "accepted", "request_id": 91, "status": "pending", "symbol": "TCS.NS"}
+    assert result == {"status": "accepted", "request_id": 91, "request_status": "pending", "symbol": "TCS.NS"}
     assert client.inserted == [{"trade_id": 12, "status": "pending"}]
