@@ -54,6 +54,8 @@ class ValidatedEntry:
 
 
 def _finite_positive(value: Any, field: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be numeric, not boolean")
     try:
         number = float(value)
     except (TypeError, ValueError) as exc:
@@ -92,6 +94,8 @@ def parse_batch_response(raw: str, expected_symbols: set[str]) -> list[dict]:
             raise ValueError("unknown or duplicate candidate symbol")
         if decision not in DECISIONS:
             raise ValueError(f"unsupported decision for {symbol}")
+        if isinstance(item.get("confidence"), bool):
+            raise ValueError(f"invalid confidence for {symbol}")
         try:
             confidence = float(item.get("confidence"))
         except (TypeError, ValueError) as exc:
