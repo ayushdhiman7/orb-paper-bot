@@ -188,7 +188,7 @@ async def ingest_event(request: Request):
     if (
         not isinstance(event_id, str) or not event_id or len(event_id) > 128
         or not isinstance(event_type, str)
-        or event_type not in {"trade.opened", "trade.closed", "bot.status_changed", "risk.alert"}
+        or event_type not in {"trade.opened", "trade.closed", "bot.status_changed", "risk.alert", "session.summary"}
         or not isinstance(occurred_at, str)
         or not isinstance(data, dict)
     ):
