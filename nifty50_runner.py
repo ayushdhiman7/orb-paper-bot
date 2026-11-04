@@ -19,6 +19,7 @@ from nifty50_position_manager import (
     build_review_prompt, parse_management_batch, protective_stop, validate_management_batch,
 )
 from nifty50_bot_runtime import scan_batch, start_feed
+from sentiment_client import fetch_candidate_sentiment
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -371,6 +372,7 @@ def run():
                         max_trades=core.MAX_TRADES_PER_DAY,
                         slippage_pct=core.SLIPPAGE_PCT, cost_pct=core.COST_PCT,
                         settings=settings, day_pnl=core.marked_day_pnl(state),
+                        sentiment_provider=fetch_candidate_sentiment,
                     )
                     print(f"[NIFTY50] {info}")
                     if result is not None and result.status in {"approved", "no_approved_entries"}:
