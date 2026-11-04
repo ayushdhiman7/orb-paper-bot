@@ -318,12 +318,11 @@ def run():
         while True:
             now = datetime.now(IST)
             clock = now.time()
-            if not feed.connected:
-                try:
-                    if feed.restart_if_stopped():
-                        print("[FEED] Angel One WebSocket restart initiated; entries remain blocked until fresh quotes arrive")
-                        notify.send("⚠️ Angel One WebSocket reconnect initiated; paper entries remain blocked until fresh quotes arrive")
-                except Exception as exc:
+            try:
+                if feed.restart_if_stopped():
+                    print("[FEED] Angel One WebSocket restart initiated; entries remain blocked until fresh quotes arrive")
+                    notify.send("⚠️ Angel One WebSocket reconnect initiated; paper entries remain blocked until fresh quotes arrive")
+            except Exception as exc:
                     print(f"[FEED] reconnect attempt failed ({type(exc).__name__}); no fallback feed will be used")
             if now.date() != session_date and not state.positions:
                 state = core.restore_state(now)
