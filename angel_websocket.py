@@ -23,9 +23,23 @@ CORRELATION_ID = "orbphase1"
 
 class AngelWebSocketFeed:
     def __init__(self, symbols, api=None, websocket_factory=None, clock=time.time,
-                 max_stale_seconds=45):
-        self.symbols = [base_name(s) for s in symbols if base_name(s) in TOKENS]
-        self.token_to_symbol = {TOKENS[s]: s for s in self.symbols}
+                 max_stale_seconds=45, token_map=None):
+        # A validated dynamic Nifty 50 token map may be injected by the universe loader.
+        # The legacy five-symbol map remains the default until runtime integration is approved.
+        available_tokens = token_map if token_map is not None else TOKENS
+        if not isinstance(available_tokens, dict) or not available_tokens:
+            raise ValueError("token_map must be a non-empty symbol-to-token mapping")
+        normalized = {base_name(k): str(v).strip() for k, v in available_tokens.items()}
+        if any(not symbol or not token.isdigit() for symbol, token in normalized.items()):
+            raise ValueError("token_map contains an invalid symbol or token")
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("token_map contains duplicate instrument tokens")
+        requested = [base_name(s) for s in symbols]
+        unknown = [s for s in requested if s not in normalized]
+        if unknown:
+            raise ValueError("symbols missing from token_map: " + ", ".join(sorted(set(unknown))))
+        self.symbols = requested
+        self.token_to_symbol = {normalized[s]: s for s in self.symbols}
         self._api = api
         self._websocket_factory = websocket_factory
         self._clock = clock
@@ -185,17 +199,34 @@ class AngelWebSocketFeed:
         self._last_day_volume[symbol] = cumulative
         current["volume"] += max(0, delta)
 
-    def last(self, symbol, now=None):
-        """Fresh LTP in rupees, or None when disconnected/stale."""
+    def quote(self, symbol, now=None):
+        """Return timestamped quote evidence only while connected and both clocks are fresh."""
         name = base_name(symbol)
         with self._lock:
+            if not self.connected:
+                return None
             quote = self.latest.get(name)
             if quote is None:
                 return None
-            age = self._clock() - quote["received_at"]
-            if age < 0 or age > self.max_stale_seconds:
+            current = self._clock() if now is None else (
+                now.timestamp() if isinstance(now, datetime) else float(now)
+            )
+            receive_age = current - quote["received_at"]
+            exchange_age = current - quote["event_time"].timestamp()
+            if (receive_age < 0 or receive_age > self.max_stale_seconds
+                    or exchange_age < -5 or exchange_age > self.max_stale_seconds):
                 return None
-            return quote["price"]
+            return {
+                "symbol": quote["symbol"],
+                "price": quote["price"],
+                "event_time": quote["event_time"],
+                "received_at": quote["received_at"],
+            }
+
+    def last(self, symbol, now=None):
+        """Fresh LTP in rupees, or None when disconnected/stale."""
+        evidence = self.quote(symbol, now)
+        return evidence["price"] if evidence is not None else None
 
     def candles(self, symbol):
         """Completed current-session 5m OHLCV candles; excludes the forming candle."""

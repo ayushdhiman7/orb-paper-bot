@@ -1,6 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from angel_websocket import AngelWebSocketFeed
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -36,16 +38,18 @@ def test_subscribes_all_configured_symbols_once_in_snap_quote_mode():
 
 
 def test_converts_paise_to_rupees_and_rejects_unknown_tokens():
-    clock = [1000.0]
+    clock = [datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()]
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0])
+    feed.connected = True
     feed._on_data(None, packet(price=2512))
     feed._on_data(None, packet(token="99999", price=999))
     assert feed.last("RELIANCE.NS") == 2512.0
 
 
 def test_stale_quotes_are_not_returned():
-    clock = [1000.0]
+    clock = [datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()]
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0], max_stale_seconds=45)
+    feed.connected = True
     feed._on_data(None, packet())
     clock[0] += 46
     assert feed.last("RELIANCE.NS") is None
@@ -83,3 +87,35 @@ def test_session_rollover_clears_previous_session_bars():
     p["exchange_timestamp"] = p["last_traded_timestamp"]
     feed._on_data(None, p)
     assert feed.candles("RELIANCE.NS") == []
+
+
+def test_dynamic_token_map_supports_validated_50_symbol_universe():
+    token_map = {f"STOCK{i:02d}": str(1000 + i) for i in range(50)}
+    feed = AngelWebSocketFeed(list(token_map), token_map=token_map)
+    assert len(feed.symbols) == 50
+    assert feed.token_to_symbol["1049"] == "STOCK49"
+
+
+def test_dynamic_token_map_rejects_missing_and_duplicate_tokens():
+    token_map = {"AAA": "100", "BBB": "100"}
+    with pytest.raises(ValueError, match="duplicate"):
+        AngelWebSocketFeed(["AAA", "BBB"], token_map=token_map)
+    with pytest.raises(ValueError, match="missing"):
+        AngelWebSocketFeed(["AAA", "CCC"], token_map={"AAA": "100"})
+
+
+
+def test_quotes_require_connected_socket_and_fresh_exchange_timestamp():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    clock = [now]
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0], max_stale_seconds=45)
+    feed._on_data(None, packet())
+    assert feed.last("RELIANCE.NS") is None
+    feed.connected = True
+    assert feed.last("RELIANCE.NS") == 2500.0
+    stale = packet()
+    old = datetime(2026, 10, 30, 9, 10, 0, tzinfo=IST).timestamp()
+    stale["exchange_timestamp"] = int(old * 1000)
+    stale["last_traded_timestamp"] = int(old * 1000)
+    feed._on_data(None, stale)
+    assert feed.last("RELIANCE.NS") is None
