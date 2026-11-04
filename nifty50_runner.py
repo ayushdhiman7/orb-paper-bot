@@ -87,6 +87,7 @@ def _persist_ai_plan(plan, now):
         "llm_decision": "take",
         "llm_reason": f"AI {plan.confidence:.0%}: {plan.reason}",
         "stop": round(plan.stop, 4),
+        "initial_stop": round(plan.stop, 4),
         "target": round(plan.target, 4),
         "ai_confidence": plan.confidence,
         "ai_rank": plan.rank,
@@ -102,13 +103,15 @@ def _persist_ai_plan(plan, now):
 def _restore_ai_levels(state):
     """Override reconstructed levels with persisted AI-approved levels."""
     rows = (core.SB.table("paper_trades")
-            .select("id,symbol,stop,target,ai_confidence,ai_rank")
+            .select("id,symbol,stop,initial_stop,target,ai_confidence,ai_rank")
             .eq("status", "open").eq("mode", "paper").execute().data or [])
     by_id = {str(row["id"]): row for row in rows}
     for position in state.positions.values():
         row = by_id.get(str(position.row_id))
         if row and row.get("stop") is not None and row.get("target") is not None:
             position.stop = float(row["stop"])
+            if row.get("initial_stop") is not None:
+                position.initial_stop = float(row["initial_stop"])
             position.target = float(row["target"])
             position.ai_confidence = row.get("ai_confidence")
             position.ai_rank = row.get("ai_rank")
@@ -254,7 +257,7 @@ def _apply_deterministic_protection(state, now, settings):
         highs = [row["high"] for row in candles[-5:]]
         round_trip_cost = core.fee_for_notional(pos.qty * pos.entry) * 2 / max(pos.qty, 1)
         new_stop, trigger = protective_stop(
-            {"entry": pos.entry, "stop": pos.stop, "side": pos.side,
+            {"entry": pos.entry, "stop": pos.stop, "initial_stop": pos.initial_stop, "side": pos.side,
              "round_trip_cost_per_share": round_trip_cost},
             price, one_r=float(settings["breakeven_r"]),\n            one_half_r=float(settings["profit_protection_r"]),\n            two_r=float(settings["trailing_start_r"]),
             protected_profit_r=float(settings["protected_profit_r"]),
