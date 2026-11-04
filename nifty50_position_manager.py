@@ -103,7 +103,7 @@ def validate_management_batch(positions, prices, now, response, min_confidence=0
     return approved, rejected
 
 
-def protective_stop(position, price, *, one_r, one_half_r, two_r, atr=None, recent_lows=(), recent_highs=()):
+def protective_stop(position, price, *, one_r, one_half_r, two_r, protected_profit_r=0.5, atr=None, recent_lows=(), recent_highs=()):
     """Return a tighter stop at +1R/+1.5R/+2R; never increase initial risk."""
     entry = float(position["entry"])
     stop = float(position["stop"])
@@ -119,7 +119,7 @@ def protective_stop(position, price, *, one_r, one_half_r, two_r, atr=None, rece
         proposed = max(proposed, entry + direction * fee_per_share) if direction == 1 else min(proposed, entry - fee_per_share)
         trigger = "breakeven_1r"
     if current_r >= one_half_r:
-        protected = entry + direction * (0.5 * risk + fee_per_share)
+        protected = entry + direction * (float(protected_profit_r) * risk + fee_per_share)
         proposed = max(proposed, protected) if direction == 1 else min(proposed, protected)
         trigger = "protect_0_5r"
     if current_r >= two_r:
