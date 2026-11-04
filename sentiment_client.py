@@ -51,13 +51,16 @@ def _fetch_one(symbol: str) -> dict | None:
             return None
         aggregation = payload.get("aggregation") or {}
         news = aggregation.get("news") or {}
+        social = aggregation.get("social") or {}
         result = {
             "source": "google_news_rss",
             "news_score": news.get("score"),
             "news_item_count": int(news.get("item_count") or 0),
             "news_status": news.get("status", "unavailable"),
+            "social_score": social.get("score"),
+            "social_item_count": int(social.get("item_count") or 0),
+            "social_status": social.get("status", "unavailable"),
             "combined_score": aggregation.get("combined_score"),
-            "social_status": (aggregation.get("social") or {}).get("status", "unavailable"),
             "model_id": payload.get("model_id"),
             "model_revision": payload.get("model_revision"),
             "collected_at": payload.get("collected_at"),
