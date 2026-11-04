@@ -18,3 +18,7 @@ systemctl cat orb-bot.service
 Do not manually delete the lock file to clear a lock. First verify no bot process is running; an unlocked file does not prevent a future start.
 
 For rollback steps and the limits of the automatic updater, see [deploy/ROLLBACK.md](deploy/ROLLBACK.md).
+
+## Opt-in Nifty 50 paper runner
+
+The separate Nifty 50 batch runtime is opt-in and remains paper-only. Review [the Phase 3 Nifty 50 runbook](docs/NIFTY50_PAPER_RUNBOOK.md) for required credentials, pending Supabase migrations, the real-account SNAP_QUOTE acceptance test, start command, reconnect behavior, and operational sign-off. Do not run it alongside the legacy bot; do not merge to main or deploy to EC2 until the operator-owned acceptance steps are complete.
