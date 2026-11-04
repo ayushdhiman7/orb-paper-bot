@@ -113,6 +113,7 @@ The final comparison must run the same market data and cost model across the det
 - [ ] Dashboard settings save with version checks; invalid cross-field R thresholds are rejected.
 - [ ] Manual exit only closes a paper position at a fresh Angel One quote.
 - [ ] Telegram notifications cover entry, exit, risk rejection, position review, reconnect, emergency stop, persistence halt, and the durable daily paper report.
+- [ ] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead.
 - [ ] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions.
 
 ## Operator-owned steps / explicit exclusions
