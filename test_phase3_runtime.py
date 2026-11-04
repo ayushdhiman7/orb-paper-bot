@@ -36,7 +36,6 @@ def _decision(symbol="S0", rank=1):
 
 
 def test_one_batch_review_and_execution_plan_only(monkeypatch):
-    monkeypatch.setattr(phase3_runtime, "collect_candidates", None, raising=False)
     # Patch the lazy-imported collector module.
     import candidate_collector
     monkeypatch.setattr(candidate_collector, "collect_candidates", lambda *a, **k: [_row()])
