@@ -41,9 +41,8 @@ def scan_batch(universe, feed, now, state, *, review_batch, capital, risk_pct,
                daily_loss_pct, max_trades, slippage_pct, cost_pct, settings=None, day_pnl=None, sentiment_provider=None):
     if not isinstance(universe, list) or len(universe) != 50:
         raise RuntimeError("Nifty 50 universe must contain exactly 50 instruments")
-    missing = [row["symbol"] for row in universe if feed.quote(row["symbol"], now) is None]
-    if missing:
-        return None, {"status": "stale_feed", "missing_quotes": len(missing)}
+    if not getattr(feed, "connected", False):
+        return None, {"status": "feed_disconnected"}
     settings = settings or {}
     limits = PortfolioLimits(
         capital=capital,
