@@ -56,6 +56,7 @@ class AngelWebSocketFeed:
         self._completed_1m = {s: deque(maxlen=500) for s in self.symbols}
         self._lock = threading.RLock()
         self._thread = None
+        self._last_start_attempt = 0.0
 
     def _login(self):
         if self._api is not None:
@@ -84,7 +85,8 @@ class AngelWebSocketFeed:
     def start(self):
         """Start the SDK's blocking WebSocket loop on a daemon thread."""
         if self._thread and self._thread.is_alive():
-            return
+            return False
+        self._last_start_attempt = self._clock()
         try:
             from SmartApi.smartWebSocketV2 import SmartWebSocketV2
             login = self._login()
@@ -104,9 +106,20 @@ class AngelWebSocketFeed:
             self.socket.on_close = self._on_close
             self._thread = threading.Thread(target=self.socket.connect, name="angel-ws", daemon=True)
             self._thread.start()
+            return True
         except Exception as exc:
             self.last_error = f"WebSocket start failed: {type(exc).__name__}: {str(exc)[:100]}"
             raise
+
+    def restart_if_stopped(self, retry_interval=30):
+        """Re-authenticate and resubscribe after the SDK's bounded reconnect loop exits."""
+        thread = self._thread
+        if self.connected or thread is None or thread.is_alive():
+            return False
+        if self._clock() - self._last_start_attempt < retry_interval:
+            return False
+        self.start()
+        return True
 
     def _on_open(self, _wsapp):
         token_list = [{"exchangeType": NSE_CM, "tokens": list(self.token_to_symbol)}]
