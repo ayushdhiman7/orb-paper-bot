@@ -373,6 +373,8 @@ function SettingsPage() {
         stale_quote_seconds: settings.stale_quote_seconds,
         ai_position_min_confidence: settings.ai_position_min_confidence,
         emergency_stop: settings.emergency_stop,
+        sentiment_enabled: settings.sentiment_enabled,
+        ai_position_management_enabled: settings.ai_position_management_enabled,
       }, token.trim());
       setSettings(result.settings); setToken("");
       setMessage(`Saved settings version ${result.version}. Bot applies changes within approximately 15 seconds.`);
@@ -411,6 +413,11 @@ function SettingsPage() {
         {numeric("ATR / swing trailing starts", "trailing_start_r", 1.5, 4, 0.1, " R")}
         <label className="setting-field"><span>Forced square-off (IST)</span><div><input type="time" min="15:00" max="15:25" value={settings.square_off_time} onChange={e => setSettings({...settings, square_off_time:e.target.value})}/><small>15:00–15:25</small></div></label>
       </div>
+    </section>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h3>AI & data features</h3><p>Optional context and position review controls.</p></div><Bot size={18}/></div>
+      <label className="feature-toggle"><span><strong>AI position management</strong><small>Batch review open positions and apply validated HOLD/SL/target/EXIT actions.</small></span><input type="checkbox" checked={settings.ai_position_management_enabled} onChange={e => setSettings({...settings, ai_position_management_enabled:e.target.checked})}/></label>
+      <label className="feature-toggle"><span><strong>News sentiment context</strong><small>Use available Google News RSS sentiment as context only; it never creates or vetoes a breakout.</small></span><input type="checkbox" checked={settings.sentiment_enabled} onChange={e => setSettings({...settings, sentiment_enabled:e.target.checked})}/></label>
     </section>
     <section className="panel settings-panel emergency-settings">
       <div><h3>Emergency stop</h3><p>When enabled, the bot halts new entries and attempts to close every open paper position using fresh Angel One quotes. It never sends broker orders.</p></div>
