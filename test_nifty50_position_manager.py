@@ -41,7 +41,7 @@ def test_management_validator_rejects_stop_widening():
 
 
 def test_profit_protection_at_one_r_and_one_half_r():
-    pos = {"entry": 100.0, "stop": 98.0, "side": "BUY",
+    pos = {"entry": 100.0, "stop": 98.0, "initial_stop": 98.0, "side": "BUY",
            "round_trip_cost_per_share": 0.1}
     stop_1r, trigger_1r = protective_stop(
         pos, 102.0, one_r=1.0, one_half_r=1.5, two_r=2.0,
@@ -56,8 +56,17 @@ def test_profit_protection_at_one_r_and_one_half_r():
     assert trigger_15r == "protect_0_5r"
 
 
+def test_profit_protection_uses_initial_risk_after_restart_or_ai_stop_change():
+    pos = {"entry": 100.0, "stop": 100.1, "initial_stop": 98.0, "side": "BUY"}
+    stop, trigger = protective_stop(
+        pos, 103.0, one_r=1.0, one_half_r=1.5, two_r=2.0,
+    )
+    assert stop == 101.0
+    assert trigger == "protect_0_5r"
+
+
 def test_two_r_trailing_uses_tighter_of_atr_and_swing_support():
-    pos = {"entry": 100.0, "stop": 98.0, "side": "BUY"}
+    pos = {"entry": 100.0, "stop": 98.0, "initial_stop": 98.0, "side": "BUY"}
     stop, trigger = protective_stop(
         pos, 104.0, one_r=1.0, one_half_r=1.5, two_r=2.0,
         atr=1.0, recent_lows=[102.0, 102.5, 103.0],
