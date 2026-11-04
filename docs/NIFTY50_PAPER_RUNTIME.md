@@ -24,8 +24,7 @@ Before running the new runner, apply `supabase/migrations/202611040001_nifty50_a
 
 The separate manual-exit migration from PR #20 must also be applied before manual-exit requests can work. Confirm the actual Supabase `paper_trades.id` type matches the `manual_exit_requests.trade_id` type before applying it.
 
-## Start command
-
+## Install runtime dependencies\n\nInstall the repository requirements and the pinned Angel One WebSocket dependencies before starting:\n\n```bash\npip install -r requirements.txt -r requirements-angelone-test.txt\n```\n\nThe sentiment service is deployed separately from the bot and is optional.\n\n## Start command\n
 After reviewing the code and applying the required migrations/configuration, the process entry point is:
 
 ```bash
