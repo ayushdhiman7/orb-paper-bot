@@ -103,7 +103,7 @@ Runtime settings are stored in orb_bot_settings and refreshed by the runner ever
 - [ ] Failed database writes halt new entries and do not mutate in-memory protection levels.
 - [ ] Dashboard settings save with version checks; invalid cross-field R thresholds are rejected.
 - [ ] Manual exit only closes a paper position at a fresh Angel One quote.
-- [ ] Telegram notifications cover entry, exit, risk rejection, position review, reconnect, emergency stop, and persistence halt.
+- [ ] Telegram notifications cover entry, exit, risk rejection, position review, reconnect, emergency stop, persistence halt, and the durable daily paper report.
 - [ ] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions.
 
 ## Operator-owned steps / explicit exclusions
