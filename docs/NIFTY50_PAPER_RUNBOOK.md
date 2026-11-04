@@ -29,9 +29,6 @@ The connected Supabase project `gbqmvnekxsckzjzcorac` was updated on 2026-11-04.
 
 For a different environment or a fresh project, apply these migrations in timestamp order using the project's approved Supabase process:
 
-
-Apply pending SQL migrations in timestamp order using the project's approved Supabase process. This repository change does not execute migrations:
-
 1. supabase/migrations/202611030001_manual_exit_requests.sql
 2. supabase/migrations/202611040001_nifty50_ai_trade_levels.sql
 3. supabase/migrations/202611040002_orb_bot_settings.sql
@@ -105,8 +102,8 @@ The final comparison must run the same market data and cost model across the det
 
 ## Acceptance checklist before calling Phase 3 operational
 
-- [ ] CI is green on the exact PR head commit.
-- [ ] Pending Supabase migrations have been applied and schema verified by the operator.
+- [x] CI is green on the exact PR head commit (verified for commit 1cb3e2bb5a02d3670b9925c37c2c58f451d5cde5).
+- [x] Supabase migrations have been applied and schema/settings verified on connected project gbqmvnekxsckzjzcorac; repeat only for a different/fresh environment.
 - [ ] Actual account SNAP_QUOTE login, subscription, and fresh quote receipt are confirmed.
 - [ ] A full market session confirms current 50-symbol universe/token mapping and quote freshness behavior.
 - [ ] Disconnect/reconnect test confirms stale data is rejected and no fallback feed is used.
@@ -123,4 +120,4 @@ The final comparison must run the same market data and cost model across the det
 
 ## Operator-owned steps / explicit exclusions
 
-The actual-account SNAP_QUOTE test, Supabase migration execution, and EC2 service/deployment changes require the operator's account and approval. Do not run the dashboard deployment workflow or merge this PR to main as part of this runbook; a push to main can deploy the dashboard to EC2. The EC2 deployment remains user-managed and untouched.
+The actual-account SNAP_QUOTE test and EC2 service/deployment changes require the operator's authenticated account and approval. Supabase migration execution is complete for connected project gbqmvnekxsckzjzcorac; a different/fresh environment still needs the listed migrations. Do not run the dashboard deployment workflow or merge this PR to main as part of this runbook; a push to main can deploy the dashboard to EC2. The EC2 deployment remains user-managed and untouched.
