@@ -92,6 +92,11 @@ def run_batch_cycle(
         if not isinstance(response, dict) or not isinstance(response.get("decisions"), list):
             return BatchResult(tuple(candidates_raw), (), (), (), "ai_unavailable")
 
+        if hasattr(feed, "quote"):
+            for row in candidates_raw:
+                if feed.quote(row["symbol"]) is None:
+                    return BatchResult(tuple(candidates_raw), (), (), (), "stale_feed")
+
         decisions = response["decisions"]
         accepted, rejected = validate_batch(candidates, decisions, portfolio)
         candidate_by_symbol = {item.symbol: item for item in candidates}
