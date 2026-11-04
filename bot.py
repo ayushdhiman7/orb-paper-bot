@@ -74,6 +74,11 @@ class Position:
     peak: float = None        # best price seen since entry (for BUY the highest, for SELL the lowest)
     last_ai_check: datetime = None
     entry_fee: float = 0.0
+    initial_stop: float = None
+
+    def __post_init__(self):
+        if self.initial_stop is None:
+            self.initial_stop = float(self.stop)
 
 
 @dataclass
