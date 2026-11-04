@@ -22,6 +22,11 @@ import webhook
 from shadow import NoAIControlLedger, ShadowLedger
 from angel_feed import AngelFeed
 
+NIFTY50_MODE = os.getenv("ORB_RUNTIME_MODE", "legacy").strip().lower() == "nifty50_batch"
+NIFTY50_SCAN_SECONDS = int(os.getenv("NIFTY50_SCAN_SECONDS", "180"))
+NIFTY50_UNIVERSE = None
+LAST_NIFTY50_SCAN = None
+
 warnings.filterwarnings("ignore")  # yfinance/pandas deprecation noise buries the real log lines
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -74,6 +79,8 @@ class Position:
     peak: float = None        # best price seen since entry (for BUY the highest, for SELL the lowest)
     last_ai_check: datetime = None
     entry_fee: float = 0.0
+    ai_confidence: float = None
+    ai_rank: int = None
 
 
 @dataclass
@@ -113,6 +120,8 @@ def log_entry(pos):
             "last_price": round(pos.entry, 2), "last_price_ts": pos.opened_at.isoformat(),
             **({"llm_decision": pos.llm_decision, "llm_reason": pos.llm_reason} if pos.llm_decision else {}),
             "status": "open", "mode": "paper",
+            **({"stop": round(pos.stop, 4), "target": round(pos.target, 4),
+                "ai_confidence": pos.ai_confidence, "ai_rank": pos.ai_rank} if pos.ai_confidence is not None else {}),
         }).select("id").execute()
         rows = getattr(res, "data", None) or []
         if not rows or rows[0].get("id") is None:
@@ -209,6 +218,9 @@ def last_price(symbol: str):
         if _valid_price(p):
             _note_source(symbol, "angel")
             return p          # live Angel One price
+        if NIFTY50_MODE:
+            _note_source(symbol, "none")
+            return None       # Nifty 50 authority mode never falls back to delayed Yahoo data
     try:
         df = fetch_candles(symbol)   # Yahoo (also the fallback when the live feed has no fresh price)
     except Exception as e:
@@ -612,11 +624,12 @@ def state_from_rows(rows, now):
             continue
         side, qty, entry = r["side"], int(r["qty"]), float(r["entry"])
         d = 1 if side == "BUY" else -1
-        stop = entry * (1 - d * STOP_LOSS_PCT / 100)
-        target = entry + d * abs(entry - stop) * TARGET_RR
+        stop = float(r.get("stop") or entry * (1 - d * STOP_LOSS_PCT / 100))
+        target = float(r.get("target") or (entry + d * abs(entry - stop) * TARGET_RR))
         fee = fee_for_notional(qty * entry)
         pos = Position(sym, side, qty, entry, stop, target, now, row_id=r.get("id"),
-                       llm_decision=r.get("llm_decision"), llm_reason=r.get("llm_reason"), entry_fee=fee)
+                       llm_decision=r.get("llm_decision"), llm_reason=r.get("llm_reason"), entry_fee=fee,
+                       ai_confidence=r.get("ai_confidence"), ai_rank=r.get("ai_rank"))
         try:
             pos.opened_at = datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")).astimezone(IST)
         except Exception:
@@ -673,6 +686,120 @@ def acquire_instance_lock():
 
 
 # ---------------- Main loop ----------------
+
+def _start_nifty50_runtime():
+    """Load a complete official universe and start the dedicated SNAP_QUOTE feed."""
+    from nifty_universe import fetch_nifty50_universe, write_universe_cache
+    from angel_websocket import AngelWebSocketFeed
+
+    universe = fetch_nifty50_universe()
+    cache_path = os.getenv("NIFTY50_UNIVERSE_CACHE", "/tmp/orb-nifty50-universe.json")
+    write_universe_cache(universe, cache_path)
+    feed = AngelWebSocketFeed(
+        [item["symbol"] for item in universe],
+        max_stale_seconds=int(os.getenv("ANGEL_MAX_STALE_SECONDS", "45")),
+        token_map={item["symbol"]: item["token"] for item in universe},
+    )
+    feed.start()
+    deadline = time.monotonic() + int(os.getenv("ANGEL_WS_CONNECT_TIMEOUT", "20"))
+    while not feed.connected and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if not feed.connected:
+        feed.stop()
+        raise RuntimeError("Angel One WebSocket did not connect; Nifty 50 mode refuses fallback")
+    return universe, feed
+
+
+def _run_nifty50_batch(state, now):
+    """Run one complete-universe Gemini batch and persist approved plans via normal paper accounting."""
+    global LAST_NIFTY50_SCAN
+    if state.halted or FEED is None or NIFTY50_UNIVERSE is None:
+        return
+    if now.time() < RANGE_END or now.time() >= NO_NEW_TRADES_AFTER:
+        return
+    if LAST_NIFTY50_SCAN is not None and (now - LAST_NIFTY50_SCAN).total_seconds() < NIFTY50_SCAN_SECONDS:
+        return
+    LAST_NIFTY50_SCAN = now
+
+    # Require fresh quote evidence for every constituent before making a batch decision.
+    missing = [item["symbol"] for item in NIFTY50_UNIVERSE if FEED.quote(item["symbol"], now) is None]
+    if missing:
+        print(f"[NIFTY50] scan skipped: fresh quotes missing for {len(missing)}/50 constituents")
+        return
+
+    from batch_entry import PortfolioLimits
+    from phase3_runtime import run_batch_cycle
+
+    min_confidence = float(os.getenv("AI_MIN_ENTRY_CONFIDENCE", "0.65"))
+    max_positions = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
+    limits = PortfolioLimits(
+        capital=CAPITAL,
+        available_cash=state.cash,
+        risk_per_trade_pct=RISK_PER_TRADE_PCT,
+        max_positions=max_positions,
+        open_positions=len(state.positions),
+        max_trades_per_day=MAX_TRADES_PER_DAY,
+        trades_today=state.trades_today,
+        daily_loss_cap_pct=DAILY_LOSS_CAP_PCT,
+        day_pnl=marked_day_pnl(state),
+        min_confidence=min_confidence,
+    )
+    result = run_batch_cycle(
+        NIFTY50_UNIVERSE, FEED, now, limits,
+        review_batch=llm_gate.review_batch,
+        slippage_pct=SLIPPAGE_PCT,
+        cost_pct=COST_PCT,
+    )
+    print(f"[NIFTY50] batch status={result.status} candidates={len(result.candidates)} "
+          f"plans={len(result.plans)} rejected={len(result.rejections)}")
+    for rejected in result.rejections:
+        print(f"[NIFTY50][RISK] {rejected.get('symbol', 'unknown')}: "
+              f"{rejected.get('reason', rejected.get('verdict', 'rejected'))}")
+    if result.status not in {"approved", "no_approved_entries"}:
+        notify.send(f"⚠️ NIFTY50 batch blocked: {result.status}; no new paper entries")
+        return
+
+    for plan in result.plans:
+        if plan.symbol in state.positions or plan.symbol in state.done_symbols or state.halted:
+            continue
+        pos = Position(
+            plan.symbol, plan.side, plan.quantity, plan.entry_fill, plan.stop, plan.target, now,
+            llm_decision="take",
+            llm_reason=f"AI {plan.confidence:.0%}: {plan.reason}",
+            entry_fee=plan.entry_fee,
+            ai_confidence=plan.confidence,
+            ai_rank=plan.rank,
+        )
+        try:
+            pos.row_id = log_entry(pos)
+        except RuntimeError as exc:
+            state.halted = True
+            print(f"[HALT] Nifty 50 paper entry persistence failed: {exc}")
+            notify.send("🛑 HALT: Nifty 50 paper entry could not be persisted; no further entries")
+            break
+        state.positions[plan.symbol] = pos
+        LEDGER.open(plan.symbol, pos)
+        state.cash -= plan.quantity * plan.entry_fill + plan.entry_fee
+        state.trades_today += 1
+        state.day_pnl -= plan.entry_fee
+        state.last_prices[plan.symbol] = plan.market_price
+        state.done_symbols.add(plan.symbol)
+        notify.send(
+            f"🤖 NIFTY50 PAPER ENTRY {plan.side} {plan.quantity} {plan.symbol} "
+            f"@ {plan.entry_fill:.2f} | SL {plan.stop:.2f} TP {plan.target:.2f} "
+            f"| AI {plan.confidence:.0%} rank #{plan.rank} | Risk verdict: APPROVED "
+            f"| {plan.reason}"
+        )
+        webhook.emit("trade.opened", now, {
+            "trade_id": pos.row_id, "symbol": plan.symbol, "side": plan.side,
+            "qty": plan.quantity, "entry": round(plan.entry_fill, 2),
+            "stop": round(plan.stop, 2), "target": round(plan.target, 2),
+            "ai_confidence": plan.confidence, "ai_rank": plan.rank,
+            "ai_reason": plan.reason, "risk_verdict": "APPROVED",
+            "status": "open", "mode": "paper",
+        })
+
+
 def run():
     global FEED, SB
     # The entry point acquires the single-instance lock before run() is called.
@@ -683,8 +810,13 @@ def run():
     webhook.start()  # Drain events persisted by a previous process before today's session.
     state = restore_state(datetime.now(IST))
     print(f"Paper bot started | capital Rs {CAPITAL} | symbols {SYMBOLS}")
+    if NIFTY50_MODE:
+        global NIFTY50_UNIVERSE
+        NIFTY50_UNIVERSE, FEED = _start_nifty50_runtime()
+        print(f"[NIFTY50] live SNAP_QUOTE feed started for {len(NIFTY50_UNIVERSE)} constituents; Yahoo fallback disabled")
+        notify.send("🚀 NIFTY50 batch paper mode started | Angel WebSocket primary | paper-only")
     notify.send(f"Paper bot started | capital Rs {CAPITAL:.0f} | data source {DATA_SOURCE}", once_key="started")
-    if DATA_SOURCE == "angel":
+    if DATA_SOURCE == "angel" and not NIFTY50_MODE:
         feed = AngelFeed(SYMBOLS)
         if feed.login():
             FEED = feed
@@ -736,18 +868,23 @@ def run():
                 return
             # positions still open: retry next loop (ONE_DAY ends via the MARKET_CLOSE check above and then fails loudly)
         elif t >= RANGE_END:
-            if not state.ranges:
-                for sym in SYMBOLS:
+            if NIFTY50_MODE:
+                manage_positions(state, now)
+                check_daily_cap(state)
+                _run_nifty50_batch(state, now)
+            else:
+                if not state.ranges:
+                    for sym in SYMBOLS:
                     r = compute_opening_range(sym)
                     if r:
                         state.ranges[sym] = r
                         print(f"[RANGE] {sym}: high {r[0]:.2f} low {r[1]:.2f}")
-            manage_positions(state, now)
-            manage_control_positions(state, now)
-            check_daily_cap(state)
-            if t < NO_NEW_TRADES_AFTER:
-                for sym in SYMBOLS:
-                    try_entry(state, sym, now)
+                manage_positions(state, now)
+                manage_control_positions(state, now)
+                check_daily_cap(state)
+                if t < NO_NEW_TRADES_AFTER:
+                    for sym in SYMBOLS:
+                        try_entry(state, sym, now)
 
         time.sleep(ANGEL_POLL_SECONDS if FEED is not None else POLL_SECONDS)
 
