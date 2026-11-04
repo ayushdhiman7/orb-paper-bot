@@ -202,6 +202,26 @@ def review_exit(ctx):
                 ("hold", "exit"), event_type="position_review", symbol=symbol)
 
 
+def review_position_management(ctx):
+    """Return a strictly parsed AI position-management proposal; never executes it."""
+    from ai_manager import MANAGEMENT_PROMPT, parse_management_response
+    symbol = ctx.get("symbol", "UNKNOWN") if isinstance(ctx, dict) else "UNKNOWN"
+
+    def parse(text):
+        decision = parse_management_response(text)
+        return {
+            "action": decision.action,
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "new_stop": decision.new_stop,
+            "new_target": decision.new_target,
+        }
+
+    return _ask(MANAGEMENT_PROMPT.format(context=json.dumps(ctx, indent=2, default=str)),
+                (), event_type="position_review", symbol=symbol,
+                parser=parse, audit_decision="management")
+
+
 BATCH_PROMPT = """You are a cautious intraday trading decision engine for a PAPER-ONLY NSE ORB system.
 Review the complete candidate list together and return exactly one decision per candidate.
 Do not invent facts. Never reverse the candidate's existing breakout side.
