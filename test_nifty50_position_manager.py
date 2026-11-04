@@ -101,3 +101,9 @@ def test_profit_protection_never_places_stop_through_market_or_widens_risk():
     assert long_stop < 100.5
     assert short_stop <= 102.0
     assert short_stop > 99.5
+
+
+def test_batch_parser_rejects_unexpected_decision_fields():
+    raw = '{"decisions":[{"symbol":"RELIANCE","action":"HOLD","reason":"setup intact","confidence":0.8,"new_stop":null,"new_target":null,"order_type":"MARKET"}]}'
+    with pytest.raises(ValueError, match="unsupported fields"):
+        parse_management_batch(raw, {"RELIANCE"})
