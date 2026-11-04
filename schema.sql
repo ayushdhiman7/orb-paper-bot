@@ -59,3 +59,66 @@ alter table shadow_trades add column if not exists ai_reason text;
 alter table shadow_trades enable row level security;
 create policy "public read shadow_trades" on shadow_trades for select to anon using (true);
 grant select on table shadow_trades to anon;
+
+
+-- Nifty 50 paper runner: persisted AI levels and immutable initial risk.
+alter table paper_trades add column if not exists stop numeric;
+alter table paper_trades add column if not exists initial_stop numeric;
+alter table paper_trades add column if not exists target numeric;
+alter table paper_trades add column if not exists ai_confidence numeric;
+alter table paper_trades add column if not exists ai_rank integer;
+
+-- Dashboard manual exits are requests only; the paper runner executes at a fresh quote.
+create table if not exists manual_exit_requests (
+  id bigint generated always as identity primary key,
+  trade_id bigint not null,
+  requested_at timestamptz not null default now(),
+  status text not null default 'pending' check (status in ('pending', 'executed', 'rejected')),
+  processed_at timestamptz,
+  result_reason text
+);
+create index if not exists manual_exit_requests_pending_idx
+  on manual_exit_requests (status, requested_at) where status = 'pending';
+alter table manual_exit_requests enable row level security;
+
+-- Versioned, server-side runtime settings; paper_only is permanently true.
+create table if not exists orb_bot_settings (
+  id integer primary key check (id = 1),
+  settings jsonb not null,
+  version bigint not null default 1,
+  updated_at timestamptz not null default now()
+);
+insert into orb_bot_settings (id, settings, version)
+values (1, '{
+  "scan_interval_seconds": 180,
+  "position_review_seconds": 300,
+  "risk_per_trade_pct": 1.0,
+  "daily_loss_cap_pct": 2.0,
+  "max_open_positions": 2,
+  "max_trades_per_day": 3,
+  "breakeven_r": 1.0,
+  "profit_protection_r": 1.5,
+  "protected_profit_r": 0.5,
+  "trailing_start_r": 2.0,
+  "square_off_time": "15:15",
+  "stale_quote_seconds": 45,
+  "ai_position_min_confidence": 0.0,
+  "emergency_stop": false,
+  "sentiment_enabled": false,
+  "ai_position_management_enabled": true,
+  "paper_only": true
+}'::jsonb, 1)
+on conflict (id) do nothing;
+alter table orb_bot_settings enable row level security;
+
+
+-- Durable delivery state for the once-per-session paper daily report.
+create table if not exists bot_session_reports (
+  session_date date primary key,
+  summary jsonb not null,
+  telegram_sent_at timestamptz,
+  webhook_queued_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table bot_session_reports enable row level security;

@@ -335,3 +335,166 @@ def test_manual_exit_request_stays_pending_without_fresh_price(monkeypatch):
     bot.process_manual_exit_requests(state, NOW)
     assert "TCS.NS" in state.positions
     assert fake.updates == []
+
+
+
+def test_position_accepts_nifty50_ai_metadata_and_keeps_initial_stop():
+    from bot import Position
+
+    position = Position(
+        "RELIANCE", "BUY", 2, 100.0, 98.0, 104.0,
+        datetime.now(IST), ai_confidence=0.91, ai_rank=1,
+    )
+    position.stop = 100.1
+
+    assert position.ai_confidence == 0.91
+    assert position.ai_rank == 1
+    assert position.initial_stop == 98.0
+
+
+def test_nifty50_runner_persists_and_applies_ai_paper_plan(monkeypatch):
+    from types import SimpleNamespace
+    import bot as core
+    import nifty50_runner as runner
+
+    class Query:
+        def __init__(self):
+            self.values = None
+        def insert(self, values):
+            self.values = values
+            return self
+        def select(self, *_args):
+            return self
+        def execute(self):
+            return SimpleNamespace(data=[{"id": 321}])
+
+    class Database:
+        def __init__(self):
+            self.query = Query()
+        def table(self, _name):
+            return self.query
+
+    database = Database()
+    monkeypatch.setattr(core, "SB", database)
+    monkeypatch.setattr(core.LEDGER, "open", lambda *_args: None)
+    monkeypatch.setattr(runner.notify, "send", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.webhook, "emit", lambda *_args, **_kwargs: None)
+    plan = SimpleNamespace(
+        symbol="RELIANCE", side="BUY", quantity=2, entry_fill=100.2,
+        market_price=100.0, stop=98.0, target=104.0, entry_fee=0.2,
+        confidence=0.91, rank=1, reason="validated breakout",
+    )
+    state = core.State()
+
+    runner._apply_plans(
+        state, SimpleNamespace(plans=(plan,)), NOW,
+    )
+
+    position = state.positions["RELIANCE"]
+    assert position.row_id == 321
+    assert position.initial_stop == 98.0
+    assert position.ai_confidence == 0.91
+    assert position.ai_rank == 1
+    assert database.query.values["initial_stop"] == 98.0
+    assert database.query.values["mode"] == "paper"
+    assert state.trades_today == 1
+
+
+def test_ai_position_level_is_not_mutated_when_database_persistence_fails(monkeypatch):
+    from types import SimpleNamespace
+    import bot as core
+    import nifty50_runner as runner
+
+    class Query:
+        def update(self, _values):
+            return self
+        def eq(self, *_args):
+            return self
+        def select(self, *_args):
+            return self
+        def execute(self):
+            return SimpleNamespace(data=[])
+
+    class Database:
+        def table(self, _name):
+            return Query()
+
+    position = core.Position("RELIANCE", "BUY", 2, 100.0, 98.0, 104.0, NOW, row_id=321)
+    state = core.State(positions={"RELIANCE": position})
+    decision = SimpleNamespace(
+        action="MOVE_SL", new_stop=100.5, new_target=None,
+        confidence=0.9, reason="protect profit",
+    )
+    monkeypatch.setattr(core, "SB", Database())
+    monkeypatch.setattr(runner.notify, "send", lambda *_args, **_kwargs: None)
+
+    runner._apply_management_decisions(
+        state, [{"symbol": "RELIANCE", "decision": decision}], NOW,
+    )
+
+    assert state.halted is True
+    assert position.stop == 98.0
+
+
+def test_nifty50_daily_report_is_persisted_and_not_resent(monkeypatch):
+    from types import SimpleNamespace
+    import bot as core
+    import nifty50_runner as runner
+
+    class Query:
+        def __init__(self, db, table):
+            self.db, self.table_name = db, table
+            self.filters, self.insert_values, self.update_values = {}, None, None
+        def select(self, *_args): return self
+        def eq(self, key, value): self.filters[key] = value; return self
+        def gte(self, key, value): self.filters["gte"] = (key, value); return self
+        def limit(self, *_args): return self
+        def insert(self, values): self.insert_values = values; return self
+        def update(self, values): self.update_values = values; return self
+        def execute(self):
+            if self.table_name == "paper_trades":
+                return SimpleNamespace(data=self.db.trades)
+            if self.insert_values is not None:
+                self.db.report = dict(self.insert_values)
+                return SimpleNamespace(data=[self.db.report])
+            if self.update_values is not None and self.db.report is not None:
+                self.db.report.update(self.update_values)
+                return SimpleNamespace(data=[])
+            if self.db.report is None:
+                return SimpleNamespace(data=[])
+            if self.filters.get("session_date") != self.db.report["session_date"]:
+                return SimpleNamespace(data=[])
+            return SimpleNamespace(data=[self.db.report])
+
+    class Database:
+        def __init__(self):
+            self.trades = [
+                {"symbol": "TCS", "status": "closed", "pnl": 150.0, "llm_decision": "take", "ai_confidence": 0.9},
+                {"symbol": "RELIANCE", "status": "closed", "pnl": -50.0, "llm_decision": "take", "ai_confidence": 0.7},
+            ]
+            self.report = None
+        def table(self, name): return Query(self, name)
+
+    database = Database()
+    monkeypatch.setattr(core, "SB", database)
+    monkeypatch.setattr(core, "CAPITAL", 14000.0)
+    messages, events = [], []
+    monkeypatch.setattr(runner.notify, "configured", lambda: True)
+    monkeypatch.setattr(runner.notify, "send", lambda message: messages.append(message) or True)
+    monkeypatch.setattr(runner.webhook, "emit", lambda *args: events.append(args) or True)
+
+    state = core.State(day_pnl=100.0)
+    assert runner._send_daily_report(state, NOW) is True
+    summary = database.report["summary"]
+    assert summary["trades"] == 2
+    assert summary["wins"] == 1
+    assert summary["losses"] == 1
+    assert summary["net_pnl"] == 100.0
+    assert summary["return_pct"] == round(100 / 14000 * 100, 4)
+    assert database.report["telegram_sent_at"] == NOW.isoformat()
+    assert database.report["webhook_queued_at"] == NOW.isoformat()
+    assert "NIFTY50 PAPER DAILY REPORT" in messages[0]
+
+    assert runner._send_daily_report(state, NOW) is True
+    assert len(messages) == 1
+    assert len(events) == 1

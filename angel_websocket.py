@@ -1,8 +1,8 @@
-"""Angel One SmartAPI WebSocket V2 feed and completed 5-minute candle builder.
+"""Angel One SmartAPI WebSocket V2 feed and completed intraday candle builder.
 
-This module is intentionally not wired into bot.py yet. Validate SNAP_QUOTE access,
-packet freshness and reconnect behaviour with the real account before switching the
-paper bot away from its current feed.
+Used by the opt-in Nifty 50 paper runner (ORB_RUNTIME_MODE=nifty50_batch).
+The runner has no broker-order path and fails closed on disconnected or stale quotes.
+Validate SNAP_QUOTE permissions and real-account reconnect behaviour before enabling it.
 """
 import os
 import threading
@@ -52,8 +52,11 @@ class AngelWebSocketFeed:
         self._session_dates = {}
         self._forming = {}
         self._completed = {s: deque(maxlen=200) for s in self.symbols}
+        self._forming_1m = {}
+        self._completed_1m = {s: deque(maxlen=500) for s in self.symbols}
         self._lock = threading.RLock()
         self._thread = None
+        self._last_start_attempt = 0.0
 
     def _login(self):
         if self._api is not None:
@@ -82,7 +85,8 @@ class AngelWebSocketFeed:
     def start(self):
         """Start the SDK's blocking WebSocket loop on a daemon thread."""
         if self._thread and self._thread.is_alive():
-            return
+            return False
+        self._last_start_attempt = self._clock()
         try:
             from SmartApi.smartWebSocketV2 import SmartWebSocketV2
             login = self._login()
@@ -102,9 +106,22 @@ class AngelWebSocketFeed:
             self.socket.on_close = self._on_close
             self._thread = threading.Thread(target=self.socket.connect, name="angel-ws", daemon=True)
             self._thread.start()
+            return True
         except Exception as exc:
             self.last_error = f"WebSocket start failed: {type(exc).__name__}: {str(exc)[:100]}"
             raise
+
+    def restart_if_stopped(self, retry_interval=30):
+        """Re-authenticate and resubscribe after the SDK's bounded reconnect loop exits."""
+        thread = self._thread
+        if thread is None or thread.is_alive():
+            return False
+        # A dead connect thread is authoritative even if a close callback was missed.
+        self.connected = False
+        if self._clock() - self._last_start_attempt < retry_interval:
+            return False
+        self.start()
+        return True
 
     def _on_open(self, _wsapp):
         token_list = [{"exchangeType": NSE_CM, "tokens": list(self.token_to_symbol)}]
@@ -164,6 +181,23 @@ class AngelWebSocketFeed:
             self._last_day_volume.pop(symbol, None)
             self._forming.pop(symbol, None)
             self._completed[symbol].clear()
+            self._forming_1m.pop(symbol, None)
+            self._completed_1m[symbol].clear()
+
+        # Maintain completed 1-minute candles for AI position reviews.
+        minute_bucket = event_time.replace(second=0, microsecond=0)
+        current_1m = self._forming_1m.get(symbol)
+        if current_1m and minute_bucket > current_1m["timestamp"]:
+            self._completed_1m[symbol].append(current_1m.copy())
+            current_1m = None
+        if current_1m is None:
+            current_1m = {"timestamp": minute_bucket, "open": quote["price"],
+                          "high": quote["price"], "low": quote["price"],
+                          "close": quote["price"], "volume": 0.0}
+            self._forming_1m[symbol] = current_1m
+        current_1m["high"] = max(current_1m["high"], quote["price"])
+        current_1m["low"] = min(current_1m["low"], quote["price"])
+        current_1m["close"] = quote["price"]
 
         minute = event_time.hour * 60 + event_time.minute
         bucket_minute = minute - (minute % 5)
@@ -227,6 +261,11 @@ class AngelWebSocketFeed:
         """Fresh LTP in rupees, or None when disconnected/stale."""
         evidence = self.quote(symbol, now)
         return evidence["price"] if evidence is not None else None
+
+    def candles_1m(self, symbol):
+        """Completed current-session 1-minute OHLC candles for AI position reviews."""
+        with self._lock:
+            return [row.copy() for row in self._completed_1m.get(base_name(symbol), ())]
 
     def candles(self, symbol):
         """Completed current-session 5m OHLCV candles; excludes the forming candle."""

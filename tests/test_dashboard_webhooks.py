@@ -298,3 +298,21 @@ def test_manual_exit_endpoint_queues_only_authorized_open_paper_trade(monkeypatc
     result = asyncio.run(dashboard_api.request_manual_exit(12, request))
     assert result == {"status": "accepted", "request_id": 91, "request_status": "pending", "symbol": "TCS.NS"}
     assert client.inserted == [{"trade_id": 12, "status": "pending"}]
+
+
+def test_ingest_accepts_paper_session_summary_event(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(dashboard_api, "SUPABASE_KEY", "service-key")
+    client = FakeClient()
+    monkeypatch.setattr(dashboard_api, "create_client", lambda *_: client)
+    payload = {
+        "event_id": "evt-session-summary", "event_type": "session.summary",
+        "occurred_at": "2026-11-04T15:35:00+05:30",
+        "source": "orb-paper-bot",
+        "data": {"session_date": "2026-11-04", "mode": "paper", "net_pnl": 125.0},
+    }
+    request, _, _, _ = make_request(payload)
+    result = asyncio.run(dashboard_api.ingest_event(request))
+    assert result == {"status": "accepted", "event_id": "evt-session-summary", "duplicate": False}
+    assert client.query.values["event_type"] == "session.summary"

@@ -2,7 +2,7 @@ name: candidate-collector-tests
 
 on:
   push:
-    branches: ["phase2/**"]
+    branches: ["phase2/**", "phase3/**", "phase3-*"]
   pull_request:
     branches: ["main"]
 
@@ -16,4 +16,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest
-      - run: python -m pytest -q test_candidate_collector.py test_nifty_universe.py test_indicators.py test_angel_websocket.py
+      - run: python -m pytest -q test_candidate_collector.py test_nifty_universe.py test_indicators.py test_angel_websocket.py test_angel_websocket_1m.py test_phase3_runtime.py test_nifty50_bot_runtime.py test_nifty50_position_manager.py test_sentiment_client.py

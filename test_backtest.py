@@ -135,3 +135,22 @@ def test_breakout_buffer_skips_marginal_breakouts(monkeypatch):
     _no_costs(monkeypatch)
     assert backtest.find_signal("T", _bars(), 1.0, 1.5, {"min_break": 0.1}) is not None
     assert backtest.find_signal("T", _bars(), 1.0, 1.5, {"min_break": 0.5}) is None
+
+
+def test_backtest_enforces_two_simultaneous_position_limit(monkeypatch):
+    monkeypatch.setattr(backtest, "CAPITAL", 14_000.0)
+    monkeypatch.setattr(backtest, "RISK_PCT", 1.0)
+    monkeypatch.setattr(backtest, "COST_PCT", 0.0)
+    monkeypatch.setattr(backtest, "SLIPPAGE_PCT", 0.0)
+    monkeypatch.setattr(backtest, "DAILY_CAP_PCT", 2.0)
+    monkeypatch.setattr(backtest, "MAX_TRADES", 3)
+    monkeypatch.setattr(backtest, "MAX_OPEN_POSITIONS", 2)
+    t0 = datetime(2026, 11, 4, 10, 0)
+    signals = [
+        {"symbol": symbol, "side": 1, "entry": 100.0, "stop": 98.0,
+         "exit_fill": 101.0, "reason": "fixture", "entry_time": t0,
+         "exit_time": t0 + timedelta(minutes=20)}
+        for symbol in ("A", "B", "C")
+    ]
+    trades = backtest.run_day(signals, cost_pct=0.0)
+    assert [trade["symbol"] for trade in trades] == ["A", "B"]

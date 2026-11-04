@@ -8,10 +8,10 @@ import {
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { loadDashboardData, requestManualExit } from "./lib/supabase";
-import type { BacktestRun, ControlTrade, DashboardRange, PaperTrade } from "./lib/supabase";
+import { loadDashboardData, requestManualExit, loadBotSettings, saveBotSettings } from "./lib/supabase";
+import type { BacktestRun, ControlTrade, DashboardRange, PaperTrade, BotSettings } from "./lib/supabase";
 
-type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor";
+type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor" | "Settings";
 type DashboardData = { trades: PaperTrade[]; openPositions: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[]; backtestsError?: string | null };
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
@@ -72,6 +72,7 @@ function App() {
     source.addEventListener("trade.closed", onTradeEvent);
     source.addEventListener("bot.status_changed", onTradeEvent);
     source.addEventListener("risk.alert", onTradeEvent);
+    source.addEventListener("session.summary", onTradeEvent);
     source.addEventListener("resync", onResync);
     return () => source.close();
   }, [refresh, activeRange]);
@@ -150,15 +151,15 @@ function App() {
       <div className="workspace-switch"><div className="workspace-avatar">P</div><div className="workspace-copy"><strong>Paper account</strong><span>NSE · Intraday</span></div><ChevronDown size={15}/></div>
       <div className="nav-caption">ANALYTICS</div>
       <nav>{navItems.map(item => <button key={item.label} className={`nav-item ${tab === item.label ? "active" : ""}`} onClick={() => { setTab(item.label); setMobileNav(false); }}><item.icon size={18}/><span>{item.label}</span>{item.label === "AI vs no-AI" && <span className="nav-new">NEW</span>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="safe-card"><div className="safe-icon"><ShieldCheck size={17}/></div><div><strong>Paper mode only</strong><span>No live orders are sent</span></div><CheckCircle2 size={15} className="safe-check"/></div><button className="nav-item muted-nav" onClick={() => setTab("Risk monitor")}><Settings2 size={18}/><span>Settings & risk</span></button><div className="profile-row"><div className="profile-avatar">A</div><div className="profile-copy"><strong>Trading workspace</strong><span>Personal account</span></div><CircleHelp size={17}/></div></div>
+      <div className="sidebar-bottom"><div className="safe-card"><div className="safe-icon"><ShieldCheck size={17}/></div><div><strong>Paper mode only</strong><span>No live orders are sent</span></div><CheckCircle2 size={15} className="safe-check"/></div><button className="nav-item muted-nav" onClick={() => setTab("Settings")}><Settings2 size={18}/><span>Settings & risk</span></button><div className="profile-row"><div className="profile-avatar">A</div><div className="profile-copy"><strong>Trading workspace</strong><span>Personal account</span></div><CircleHelp size={17}/></div></div>
     </aside>
     <nav className="bottom-nav" aria-label="Main">{navItems.map(item => <button key={item.label} className={`bottom-nav-item ${tab === item.label ? "active" : ""}`} aria-current={tab === item.label ? "page" : undefined} onClick={() => { setTab(item.label); window.scrollTo({ top: 0 }); }}><item.icon size={20}/><span>{item.short}</span></button>)}</nav>
     {mobileNav && <button className="mobile-scrim" onClick={() => setMobileNav(false)} aria-label="Close menu"/>}
     <main className="main-panel">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span className="breadcrumb-parent">Workspace</span><span>/</span><strong>{tab}</strong></div></div><div className="topbar-actions"><div className="market-pill" aria-label={streamConnected ? "Live event stream connected" : "Live event stream disconnected"}><span className={streamConnected ? "status-dot" : "status-dot status-offline"}/><span>{streamConnected ? "Live" : "Connecting"}</span></div><button className="icon-button" title="Notifications"><Bell size={18}/><i/></button><div className="top-avatar">A</div></div></header>
       <div className="content-wrap">
-        <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh(activeRange)} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
-        {loading ? (
+        <section className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> STRATEGY WORKSPACE <span className="eyebrow-sep">/</span> NSE ORB</div><h1>{tab === "Overview" ? "Good trading starts with clarity." : tab}</h1><p>{tab === "Overview" ? "A clear view of your paper strategy, execution quality and AI decisions." : tab === "AI vs no-AI" ? "Measure whether AI decisions improve the same breakout strategy." : tab === "Trade journal" ? "Every simulated entry, exit and decision in one place." : tab === "Backtests" ? "Historical strategy research, kept separate from live paper results."  : tab === "Settings" ? "Configure paper strategy, AI reviews and hard risk controls." : "Keep exposure, losses and execution risk in view."}</p></div><div className="heading-actions"><button className="button-secondary" onClick={() => void refresh(activeRange)} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button><button className="button-primary" onClick={() => { const rows = [["id","timestamp","symbol","side","qty","entry","exit","pnl","reason","ai_decision"], ...filteredTrades.map(t => [t.id,t.ts,t.symbol,t.side,t.qty,t.entry,t.exit ?? "",t.pnl ?? "",t.reason ?? "",t.llm_decision ?? ""])]; const csv = rows.map(row => row.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "orb-paper-trades.csv"; link.click(); URL.revokeObjectURL(link.href); }}><Download size={15}/> Export CSV</button></div></section>
+        {tab === "Settings" ? <SettingsPage/> : loading ? (
           <div className="dashboard-loader" role="status" aria-live="polite">
             <RefreshCw size={22} className="spin" />
             <strong>Loading {activeRange} data</strong>
@@ -335,6 +336,104 @@ function ResearchPage({runs}:{runs:BacktestRun[]}) {
     {runs.length > 1 && <section className="panel table-panel"><div className="panel-heading"><div><h3>Backtest history</h3><p>Saved runs newest first</p></div></div><div className="table-scroll"><table><thead><tr><th>Run</th><th>Created</th><th>Baseline trades</th><th>Baseline P&amp;L</th><th>Expectancy</th><th>Profit factor</th><th>Test P&amp;L</th></tr></thead><tbody>{runs.map(run=>{const b=run.result?.baseline;const t=run.result?.test;return <tr key={run.id}><td>#{run.id}</td><td className="date-cell">{formatDate(run.created_at)}</td><td>{b?.n??"—"}</td><td>{b?.total==null?"—":money(Number(b.total))}</td><td>{b?.exp==null?"—":preciseMoney(Number(b.exp))}</td><td>{b?.pf==null?"—":Number(b.pf).toFixed(2)}</td><td>{t?.total==null?"—":money(Number(t.total))}</td></tr>})}</tbody></table></div></section>}
   </>;
 }
+
+type NumericSettingKey = Exclude<keyof BotSettings, "square_off_time" | "emergency_stop" | "paper_only">;
+
+function SettingsPage() {
+  const [settings, setSettings] = useState<BotSettings | null>(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void loadBotSettings().then(data => { if (active) setSettings(data.settings); })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : "Unable to load settings."); });
+    return () => { active = false; };
+  }, []);
+  const setNumber = (key: NumericSettingKey, value: string) => {
+    if (!settings) return;
+    setSettings({ ...settings, [key]: Number(value) });
+  };
+  const save = async () => {
+    if (!settings || !token.trim()) { setError("Enter the dashboard control token to save settings."); return; }
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await saveBotSettings({
+        scan_interval_seconds: settings.scan_interval_seconds,
+        position_review_seconds: settings.position_review_seconds,
+        risk_per_trade_pct: settings.risk_per_trade_pct,
+        daily_loss_cap_pct: settings.daily_loss_cap_pct,
+        max_open_positions: settings.max_open_positions,
+        max_trades_per_day: settings.max_trades_per_day,
+        breakeven_r: settings.breakeven_r,
+        profit_protection_r: settings.profit_protection_r,
+        protected_profit_r: settings.protected_profit_r,
+        trailing_start_r: settings.trailing_start_r,
+        square_off_time: settings.square_off_time,
+        stale_quote_seconds: settings.stale_quote_seconds,
+        ai_position_min_confidence: settings.ai_position_min_confidence,
+        emergency_stop: settings.emergency_stop,
+        sentiment_enabled: settings.sentiment_enabled,
+        ai_position_management_enabled: settings.ai_position_management_enabled,
+      }, token.trim());
+      setSettings(result.settings); setToken("");
+      setMessage(`Saved settings version ${result.version}. Bot applies changes within approximately 15 seconds.`);
+    } catch (e) { setToken(""); setError(e instanceof Error ? e.message : "Settings save failed."); }
+    finally { setBusy(false); }
+  };
+  if (!settings && !error) return <section className="panel"><p>Loading strategy settings…</p></section>;
+  if (!settings) return <section className="panel"><div className="notice error-notice">{error}</div></section>;
+  const numeric = (label: string, key: NumericSettingKey, min: number, max: number, step: number, suffix = "") =>
+    <label className="setting-field" key={String(key)}><span>{label}</span><div><input type="number" min={min} max={max} step={step} value={Number(settings[key])} onChange={e => setNumber(key, e.target.value)}/><small>{min}–{max}{suffix}</small></div></label>;
+  return <>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h3>Entry & AI schedule</h3><p>Changes are versioned and read by the paper runner.</p></div><span className="ai-tag ai-na">LIVE CONFIG</span></div>
+      <div className="settings-grid">
+        {numeric("Nifty 50 scan interval", "scan_interval_seconds", 60, 900, 30, " sec")}
+        {numeric("Open-position AI review", "position_review_seconds", 60, 1800, 60, " sec")}
+        {numeric("AI position confidence minimum", "ai_position_min_confidence", 0, 1, 0.05)}
+        {numeric("Stale quote rejection", "stale_quote_seconds", 10, 90, 5, " sec")}
+      </div>
+    </section>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h3>Risk limits</h3><p>Hard limits enforced again by the deterministic risk engine.</p></div><ShieldCheck size={18}/></div>
+      <div className="settings-grid">
+        {numeric("Risk per trade", "risk_per_trade_pct", 0.1, 1, 0.1, "%")}
+        {numeric("Daily loss cap", "daily_loss_cap_pct", 0.5, 2, 0.1, "%")}
+        {numeric("Maximum open positions", "max_open_positions", 1, 2, 1)}
+        {numeric("Maximum trades per day", "max_trades_per_day", 1, 3, 1)}
+      </div>
+    </section>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h3>Position protection & schedule</h3><p>Profit protection thresholds are measured in initial risk units (R).</p></div></div>
+      <div className="settings-grid">
+        {numeric("Move toward breakeven", "breakeven_r", 0.5, 2, 0.1, " R")}
+        {numeric("Profit protection starts", "profit_protection_r", 1, 3, 0.1, " R")}
+        {numeric("Net profit to protect", "protected_profit_r", 0.1, 1.5, 0.1, " R")}
+        {numeric("ATR / swing trailing starts", "trailing_start_r", 1.5, 4, 0.1, " R")}
+        <label className="setting-field"><span>Forced square-off (IST)</span><div><input type="time" min="15:00" max="15:25" value={settings.square_off_time} onChange={e => setSettings({...settings, square_off_time:e.target.value})}/><small>15:00–15:25</small></div></label>
+      </div>
+    </section>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h3>AI & data features</h3><p>Optional context and position review controls.</p></div><Bot size={18}/></div>
+      <label className="feature-toggle"><span><strong>AI position management</strong><small>Batch review open positions and apply validated HOLD/SL/target/EXIT actions.</small></span><input type="checkbox" checked={settings.ai_position_management_enabled} onChange={e => setSettings({...settings, ai_position_management_enabled:e.target.checked})}/></label>
+      <label className="feature-toggle"><span><strong>News sentiment context</strong><small>Use available Google News RSS sentiment as context only; it never creates or vetoes a breakout.</small></span><input type="checkbox" checked={settings.sentiment_enabled} onChange={e => setSettings({...settings, sentiment_enabled:e.target.checked})}/></label>
+    </section>
+    <section className="panel settings-panel emergency-settings">
+      <div><h3>Emergency stop</h3><p>When enabled, the bot halts new entries and attempts to close every open paper position using fresh Angel One quotes. It never sends broker orders.</p></div>
+      <label className="emergency-toggle"><input type="checkbox" checked={settings.emergency_stop} onChange={e => { if (e.target.checked && !window.confirm("Emergency stop will halt new entries and attempt to close every open paper position at a fresh Angel One quote. Continue?")) return; setSettings({...settings, emergency_stop:e.target.checked}); }}/><span>{settings.emergency_stop ? "STOP ACTIVE" : "Disabled"}</span></label>
+    </section>
+    <section className="panel settings-panel">
+      <div className="settings-readonly"><ShieldCheck size={17}/><div><strong>Paper-only execution is locked</strong><span>Live broker orders cannot be enabled from this dashboard.</span></div><b>ON</b></div>
+      <label className="setting-token"><span>Dashboard control token</span><input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} placeholder="Enter token to save settings"/></label>
+      {error && <div className="notice error-notice">{error}</div>}
+      {message && <div className="notice success-notice">{message}</div>}
+      <div className="settings-actions"><button className="button-secondary" onClick={() => {setError("");setMessage("");void loadBotSettings().then(d=>setSettings(d.settings)).catch(e=>setError(e.message));}}>Reload</button><button className="button-primary" onClick={() => void save()} disabled={busy || !token.trim()}>{busy ? "Saving…" : "Save settings"}</button></div>
+    </section>
+  </>;
+}
+
 function RiskPage({trades,openTrades,totalPnl}:{trades:PaperTrade[];openTrades:PaperTrade[];totalPnl:number}) {
   const exposure=openTrades.reduce((s,t)=>s+Number(t.qty)*Number(t.last_price??t.entry),0);
   const losses=trades.filter(t=>Number(t.pnl)<0).length;

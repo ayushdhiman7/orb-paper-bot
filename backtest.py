@@ -30,7 +30,8 @@ RISK_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))
 COST_PCT = float(os.getenv("COST_PCT", "0.10"))          # total entry + exit transaction costs, % notional
 SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))  # per side, % of price
 MAX_TRADES = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
-DAILY_CAP_PCT = float(os.getenv("DAILY_LOSS_CAP_PCT", "3.0"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))
+DAILY_CAP_PCT = float(os.getenv("DAILY_LOSS_CAP_PCT", "2.0"))
 TRAIN_FRACTION = 0.7
 
 STOPS = [0.5, 0.75, 1.0, 1.25, 1.5]   # stop-loss % (baseline 1.0)
@@ -243,7 +244,7 @@ def run_day(signals, cost_pct=None):
             continue
 
         if kind == "entry":
-            if halted or taken >= MAX_TRADES:
+            if halted or taken >= MAX_TRADES or len(open_) >= MAX_OPEN_POSITIONS:
                 continue
             per_share = abs(signal["entry"] - signal["stop"])
             if per_share <= 0:

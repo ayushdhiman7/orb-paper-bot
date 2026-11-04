@@ -54,3 +54,46 @@ export async function requestManualExit(tradeId: number | string, controlToken: 
   if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Manual exit request failed (HTTP ${response.status}).`);
   return payload as { request_id: number; status: string; symbol: string };
 }
+
+
+export type BotSettings = {
+  scan_interval_seconds: number;
+  position_review_seconds: number;
+  risk_per_trade_pct: number;
+  daily_loss_cap_pct: number;
+  max_open_positions: number;
+  max_trades_per_day: number;
+  breakeven_r: number;
+  profit_protection_r: number;
+  protected_profit_r: number;
+  trailing_start_r: number;
+  square_off_time: string;
+  stale_quote_seconds: number;
+  ai_position_min_confidence: number;
+  emergency_stop: boolean;
+  sentiment_enabled: boolean;
+  ai_position_management_enabled: boolean;
+  paper_only: true;
+};
+export type BotSettingsResponse = { settings: BotSettings; version: number; updated_at: string };
+
+export async function loadBotSettings(): Promise<BotSettingsResponse> {
+  if (!apiBase) throw new Error("Backend API is not configured.");
+  const response = await fetch(`${apiBase}/api/settings`, { headers: { Accept: "application/json" }, credentials: "include" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Settings API returned HTTP ${response.status}.`);
+  return payload as BotSettingsResponse;
+}
+
+export async function saveBotSettings(settings: Partial<Omit<BotSettings, "paper_only">>, controlToken: string): Promise<BotSettingsResponse> {
+  if (!apiBase) throw new Error("Backend API is not configured.");
+  const response = await fetch(`${apiBase}/api/settings`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${controlToken}` },
+    credentials: "include",
+    body: JSON.stringify(settings),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Settings save failed (HTTP ${response.status}).`);
+  return payload as BotSettingsResponse;
+}

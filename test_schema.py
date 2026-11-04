@@ -10,6 +10,13 @@ def test_paper_trade_schema_has_columns_written_by_bot():
         "last_price_ts timestamptz",
         "llm_decision text",
         "llm_reason text",
+        "initial_stop numeric",
+        "target numeric",
+        "ai_confidence numeric",
+        "ai_rank integer",
+        "create table if not exists manual_exit_requests",
+        "create table if not exists orb_bot_settings",
+        "create table if not exists bot_session_reports",
     )
     for column in required:
         assert column in sql, f"schema.sql is missing bot logging column: {column}"
