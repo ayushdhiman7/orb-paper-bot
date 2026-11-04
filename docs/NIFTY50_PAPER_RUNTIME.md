@@ -64,6 +64,7 @@ Do not run this alongside the legacy bot service. Both use the same single-insta
 Automated coverage includes universe validation, feed freshness, WebSocket subscription and reconnect supervision, batch candidate validation, paper sizing, stop protection for long and short positions, AI position batch parsing, dashboard setting validation, manual-exit safeguards, and paper-entry persistence.
 
 The following remain operator acceptance steps and are not proven by mocked CI:
+- A point-in-time Nifty 50 historical backtest of this AI batch runtime is not yet certified. The existing backtest.py is a short Yahoo-history legacy ORB smoke test; it is not Phase 9 sign-off. Avoid survivorship/look-ahead bias by using historical constituents and archived sentiment snapshots.
 - Actual Angel One SNAP_QUOTE entitlement and fresh packet receipt using the account's API key, JWT and feed token.
 - Full-session symbol coverage and disconnect/reconnect behavior during NSE market hours.
 - Applying and verifying the pending Supabase migrations.
