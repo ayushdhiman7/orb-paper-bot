@@ -188,6 +188,7 @@ def _apply_management_decisions(state, approved, now):
 
 def _apply_deterministic_protection(state, now):
     """Apply agreed +1R/+1.5R/+2R protections before normal stop/target checks."""
+    changed = False
     from indicators import calculate_indicators
     for symbol, pos in list(state.positions.items()):
         price = core.last_price(symbol)
@@ -209,6 +210,7 @@ def _apply_deterministic_protection(state, now):
         if not tighter:
             continue
         pos.stop = new_stop
+        changed = True
         try:
             rows = (core.SB.table("paper_trades").update({"stop": round(pos.stop, 4)})
                     .eq("id", pos.row_id).eq("status", "open").select("id").execute().data or [])
@@ -224,6 +226,7 @@ def _apply_deterministic_protection(state, now):
             "symbol": symbol, "action": trigger, "stop": pos.stop,
             "mode": "paper", "risk_verdict": "APPROVED",
         })
+    return changed
 
 
 def run():
@@ -268,10 +271,10 @@ def run():
                     if price is not None:
                         core.close_position(state, symbol, price, "square_off", now)
             elif clock >= core.RANGE_END:
-                _apply_deterministic_protection(state, now)
+                protection_event = _apply_deterministic_protection(state, now)
                 core.manage_positions(state, now)
                 core.check_daily_cap(state)
-                review_due = bool(state.positions) and (
+                review_due = bool(state.positions) and (protection_event or
                     last_position_review is None or
                     (now - last_position_review).total_seconds() >= int(os.getenv("AI_POSITION_REVIEW_SECONDS", "300"))
                 )
