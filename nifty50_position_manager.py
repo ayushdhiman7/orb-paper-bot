@@ -35,6 +35,7 @@ def build_review_prompt(positions: Sequence[Mapping], prices: Mapping[str, float
             "stop": context.stop, "target": context.target,
             "minutes_held": max(0, int((now - context.opened_at).total_seconds() // 60)),
             "peak_price": context.peak_price, "risk_per_share": context.risk_per_share,
+            "completed_1m_candles": pos.get("candles_1m", [])[-12:],
         })
         symbols.add(symbol)
     prompt = (
