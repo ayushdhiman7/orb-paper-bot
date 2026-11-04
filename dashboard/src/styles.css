@@ -271,3 +271,9 @@ button,select,input,a{touch-action:manipulation}
 @media(max-width:700px){.settings-grid{grid-template-columns:1fr}.emergency-settings{align-items:flex-start;flex-direction:column}.settings-actions>*{flex:1}}
 
 .success-notice{border:1px solid #315846;background:#10251d;color:#a5e8bf;padding:11px 13px;border-radius:8px;font-size:11px;line-height:1.5}
+
+.feature-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 0;border-top:1px solid #2c303b;color:var(--text)}
+.feature-toggle>span{display:grid;gap:4px}
+.feature-toggle strong{font-size:11px}
+.feature-toggle small{color:var(--muted);font-size:10px;line-height:1.5}
+.feature-toggle input{width:18px;height:18px;flex:0 0 auto;accent-color:var(--accent)}
