@@ -362,6 +362,107 @@ async def request_manual_exit(trade_id: int, request: Request):
         logger.exception("Unable to queue manual paper exit trade_id=%s", trade_id)
         raise HTTPException(status_code=502, detail="Unable to queue manual exit")
 
+
+DEFAULT_BOT_SETTINGS = {
+    "scan_interval_seconds": 180, "position_review_seconds": 300,
+    "risk_per_trade_pct": 1.0, "daily_loss_cap_pct": 2.0,
+    "max_open_positions": 2, "max_trades_per_day": 3,
+    "breakeven_r": 1.0, "profit_protection_r": 1.5,
+    "protected_profit_r": 0.5, "trailing_start_r": 2.0,
+    "square_off_time": "15:15", "stale_quote_seconds": 45,
+    "ai_position_min_confidence": 0.0, "emergency_stop": False, "paper_only": True,
+}
+BOT_SETTING_RANGES = {
+    "scan_interval_seconds": (60, 900), "position_review_seconds": (60, 1800),
+    "risk_per_trade_pct": (0.1, 1.0), "daily_loss_cap_pct": (0.5, 2.0),
+    "max_open_positions": (1, 2), "max_trades_per_day": (1, 3),
+    "breakeven_r": (0.5, 2.0), "profit_protection_r": (1.0, 3.0),
+    "protected_profit_r": (0.1, 1.5), "trailing_start_r": (1.5, 4.0),
+    "stale_quote_seconds": (10, 90), "ai_position_min_confidence": (0.0, 1.0),
+}
+
+
+def _settings_client():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Dashboard database configuration is missing")
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def _read_bot_settings():
+    rows = (_settings_client().table("orb_bot_settings")
+            .select("settings,version,updated_at").eq("id", 1).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(status_code=503, detail="Bot settings have not been initialized; apply the settings migration")
+    settings = {**DEFAULT_BOT_SETTINGS, **(rows[0].get("settings") or {})}
+    settings["paper_only"] = True
+    return {"settings": settings, "version": rows[0]["version"], "updated_at": rows[0]["updated_at"]}
+
+
+def _validate_bot_settings(payload):
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(status_code=422, detail="Settings payload must be a non-empty object")
+    allowed = set(DEFAULT_BOT_SETTINGS) - {"paper_only"}
+    unknown = set(payload) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail="Unsupported settings: " + ", ".join(sorted(unknown)))
+    clean = {}
+    for key, value in payload.items():
+        if key == "emergency_stop":
+            if not isinstance(value, bool):
+                raise HTTPException(status_code=422, detail="emergency_stop must be boolean")
+            clean[key] = value
+        elif key == "square_off_time":
+            if not isinstance(value, str) or len(value) != 5:
+                raise HTTPException(status_code=422, detail="square_off_time must use HH:MM")
+            try:
+                parsed = datetime.strptime(value, "%H:%M").time()
+            except ValueError:
+                raise HTTPException(status_code=422, detail="square_off_time must use HH:MM")
+            if not time(15, 0) <= parsed <= time(15, 25):
+                raise HTTPException(status_code=422, detail="square_off_time must be between 15:00 and 15:25 IST")
+            clean[key] = value
+        else:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise HTTPException(status_code=422, detail=f"{key} must be numeric")
+            low, high = BOT_SETTING_RANGES[key]
+            if not low <= float(value) <= high:
+                raise HTTPException(status_code=422, detail=f"{key} must be between {low} and {high}")
+            clean[key] = int(value) if key in {"scan_interval_seconds", "position_review_seconds",
+                "max_open_positions", "max_trades_per_day", "stale_quote_seconds"} else float(value)
+    return clean
+
+
+@app.get("/api/settings")
+async def get_bot_settings():
+    return await run_in_threadpool(_read_bot_settings)
+
+
+@app.put("/api/settings")
+async def update_bot_settings(request: Request):
+    expected = _dashboard_control_token()
+    supplied = request.headers.get("Authorization", "")
+    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:], expected):
+        raise HTTPException(status_code=401, detail="Settings authorization failed")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid settings JSON")
+    clean = _validate_bot_settings(payload)
+    current = await run_in_threadpool(_read_bot_settings)
+    merged = {**current["settings"], **clean, "paper_only": True}
+    def persist():
+        return (_settings_client().table("orb_bot_settings").update({
+            "settings": merged, "version": int(current["version"]) + 1,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }).eq("id", 1).eq("version", current["version"])
+          .select("settings,version,updated_at").execute().data or [])
+    rows = await run_in_threadpool(persist)
+    if not rows:
+        raise HTTPException(status_code=409, detail="Settings changed concurrently; reload and retry")
+    return {"settings": {**rows[0]["settings"], "paper_only": True},
+            "version": rows[0]["version"], "updated_at": rows[0]["updated_at"]}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
