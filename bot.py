@@ -75,6 +75,8 @@ class Position:
     last_ai_check: datetime = None
     entry_fee: float = 0.0
     initial_stop: float = None
+    ai_confidence: float = None
+    ai_rank: int = None
 
     def __post_init__(self):
         if self.initial_stop is None:
