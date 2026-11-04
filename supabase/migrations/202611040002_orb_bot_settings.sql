@@ -21,6 +21,8 @@ values (1, '{
   "stale_quote_seconds": 45,
   "ai_position_min_confidence": 0.0,
   "emergency_stop": false,
+  "sentiment_enabled": false,
+  "ai_position_management_enabled": true,
   "paper_only": true
 }'::jsonb, 1)
 on conflict (id) do nothing;
