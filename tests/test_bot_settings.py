@@ -45,3 +45,23 @@ def test_accepts_valid_partial_update():
         "emergency_stop": True,
         "square_off_time": "15:20",
     }
+
+
+def test_rejects_inconsistent_profit_protection_thresholds():
+    with pytest.raises(HTTPException) as error:
+        dashboard_api._validate_setting_relationships({
+            "breakeven_r": 1.5,
+            "profit_protection_r": 1.2,
+            "protected_profit_r": 0.5,
+            "trailing_start_r": 2.0,
+        })
+    assert error.value.status_code == 422
+
+
+def test_accepts_balanced_profit_protection_thresholds():
+    dashboard_api._validate_setting_relationships({
+        "breakeven_r": 1.0,
+        "profit_protection_r": 1.5,
+        "protected_profit_r": 0.5,
+        "trailing_start_r": 2.0,
+    })
