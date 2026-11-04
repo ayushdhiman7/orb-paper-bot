@@ -456,6 +456,7 @@ def test_nifty50_daily_report_is_persisted_and_not_resent(monkeypatch):
                 return SimpleNamespace(data=self.db.trades)
             if self.insert_values is not None:
                 self.db.report = dict(self.insert_values)
+                return SimpleNamespace(data=[self.db.report])
             if self.update_values is not None and self.db.report is not None:
                 self.db.report.update(self.update_values)
                 return SimpleNamespace(data=[])
