@@ -16,7 +16,7 @@ It does not submit broker orders. The legacy `bot.py` entry point remains unchan
 - Existing paper risk settings: `CAPITAL`, `RISK_PER_TRADE_PCT`, `DAILY_LOSS_CAP_PCT`, `MAX_TRADES_PER_DAY`, `SLIPPAGE_PCT`, `COST_PCT`
 - Optional sentiment: `SENTIMENT_SERVICE_URL`, `SENTIMENT_API_TOKEN`, `SENTIMENT_LOOKBACK_MINUTES` (default 180). News sentiment is context only, cached for five minutes, and currently supports the five reviewed aliases RELIANCE, TCS, INFY, HDFCBANK and ICICIBANK. Social sentiment is not yet connected.
 
-The runner refuses to use Yahoo prices. It skips a scan unless all 50 constituents have fresh WebSocket quote evidence. A failed universe refresh or WebSocket startup aborts startup.
+The runner refuses to use Yahoo prices. It requires the WebSocket to remain connected, then evaluates each constituent independently and admits only symbols with fresh quote evidence. One inactive constituent does not block otherwise valid candidates. A failed universe refresh or WebSocket startup aborts startup.
 
 ## Database migration
 
