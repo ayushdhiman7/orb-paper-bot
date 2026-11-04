@@ -334,20 +334,15 @@ def _send_daily_report(state, now):
         report = existing[0]
         stored_summary = report.get("summary") or summary
         updates = {}
+        confidence = stored_summary.get("average_ai_confidence")
+        confidence_label = f"{float(confidence):.0%}" if confidence is not None else "n/a"
         message = (
             f"📊 NIFTY50 PAPER DAILY REPORT · {session_date}\n"
             f"Trades: {stored_summary.get('trades', 0)} | "
             f"W/L/BE: {stored_summary.get('wins', 0)}/{stored_summary.get('losses', 0)}/{stored_summary.get('breakeven', 0)}\n"
             f"Net P&L: ₹{float(stored_summary.get('net_pnl') or 0):+.2f} "
             f"({float(stored_summary.get('return_pct') or 0):+.2f}%)\n"
-            f"AI entries: {stored_summary.get('ai_trade_count', 0)} | "
-            f"Avg confidence: {float(stored_summary['average_ai_confidence']):.0%}" if stored_summary.get("average_ai_confidence") is not None
-            else f"📊 NIFTY50 PAPER DAILY REPORT · {session_date}\n"
-                 f"Trades: {stored_summary.get('trades', 0)} | "
-                 f"W/L/BE: {stored_summary.get('wins', 0)}/{stored_summary.get('losses', 0)}/{stored_summary.get('breakeven', 0)}\n"
-                 f"Net P&L: ₹{float(stored_summary.get('net_pnl') or 0):+.2f} "
-                 f"({float(stored_summary.get('return_pct') or 0):+.2f}%)\n"
-                 f"AI entries: {stored_summary.get('ai_trade_count', 0)} | Avg confidence: n/a"
+            f"AI entries: {stored_summary.get('ai_trade_count', 0)} | Avg confidence: {confidence_label}"
         )
         message += f"\nOpen positions: {stored_summary.get('open_positions', 0)} | Mode: PAPER"
         if notify.configured() and not report.get("telegram_sent_at") and notify.send(message):
