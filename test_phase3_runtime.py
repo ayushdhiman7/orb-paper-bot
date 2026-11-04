@@ -138,3 +138,23 @@ def test_stale_quote_after_sentiment_blocks_ai(monkeypatch):
     )
     assert result.status == "stale_feed"
     assert called == []
+
+
+def test_quote_that_goes_stale_during_gemini_review_blocks_execution(monkeypatch):
+    import candidate_collector
+    monkeypatch.setattr(candidate_collector, "collect_candidates", lambda *a, **k: [_row()])
+    class AgingFeed:
+        def __init__(self):
+            self.calls = 0
+        def quote(self, symbol):
+            self.calls += 1
+            return {"symbol": symbol} if self.calls == 1 else None
+    feed = AgingFeed()
+    called = []
+    result = phase3_runtime.run_batch_cycle(
+        _universe(), feed, object(), _limits(),
+        review_batch=lambda *_: {"decisions": [_decision()]},
+        slippage_pct=0.05, cost_pct=0.1,
+    )
+    assert result.status == "stale_feed"
+    assert result.plans == ()
