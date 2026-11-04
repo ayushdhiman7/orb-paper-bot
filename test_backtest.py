@@ -147,7 +147,7 @@ def test_backtest_enforces_two_simultaneous_position_limit(monkeypatch):
     monkeypatch.setattr(backtest, "MAX_OPEN_POSITIONS", 2)
     t0 = datetime(2026, 11, 4, 10, 0)
     signals = [
-        {"symbol": symbol, "side": 1, "entry": 100.0, "stop": 99.0,
+        {"symbol": symbol, "side": 1, "entry": 100.0, "stop": 98.0,
          "exit_fill": 101.0, "reason": "fixture", "entry_time": t0,
          "exit_time": t0 + timedelta(minutes=20)}
         for symbol in ("A", "B", "C")
