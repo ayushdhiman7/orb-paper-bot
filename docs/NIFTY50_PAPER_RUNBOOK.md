@@ -104,9 +104,9 @@ The final comparison must run the same market data and cost model across the det
 
 - [x] CI is green on the exact PR head commit (verified for commit 1cb3e2bb5a02d3670b9925c37c2c58f451d5cde5).
 - [x] Supabase migrations have been applied and schema/settings verified on connected project gbqmvnekxsckzjzcorac; repeat only for a different/fresh environment.
-- [ ] Actual account SNAP_QUOTE login, subscription, and fresh quote receipt are confirmed.
-- [ ] A full market session confirms current 50-symbol universe/token mapping and quote freshness behavior.
-- [ ] Disconnect/reconnect test confirms stale data is rejected and no fallback feed is used.
+- [x] Actual account SNAP_QUOTE login, subscription, and fresh quote receipt are confirmed (operator-confirmed).
+- [x] A full market session confirms current 50-symbol universe/token mapping and quote freshness behavior (operator-confirmed).
+- [x] Disconnect/reconnect test confirms stale data is rejected and no fallback feed is used (operator-confirmed).
 - [ ] Paper entry writes the trade row before in-memory portfolio state changes.
 - [ ] Restart restores open position, original stop, current stop, target, AI confidence, and rank.
 - [ ] +1R, +1.5R, and +2R protection behavior is checked for long and short paper positions, including fees and restart.
@@ -115,8 +115,8 @@ The final comparison must run the same market data and cost model across the det
 - [ ] Dashboard settings save with version checks; invalid cross-field R thresholds are rejected.
 - [ ] Manual exit only closes a paper position at a fresh Angel One quote.
 - [ ] Telegram notifications cover entry, exit, risk rejection, position review, reconnect, emergency stop, persistence halt, and the durable daily paper report.
-- [ ] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead.
-- [ ] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions.
+- [x] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead (operator-confirmed).
+- [x] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions (operator-confirmed).
 
 ## Operator-owned steps / explicit exclusions
 
