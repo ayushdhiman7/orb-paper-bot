@@ -114,8 +114,10 @@ class AngelWebSocketFeed:
     def restart_if_stopped(self, retry_interval=30):
         """Re-authenticate and resubscribe after the SDK's bounded reconnect loop exits."""
         thread = self._thread
-        if self.connected or thread is None or thread.is_alive():
+        if thread is None or thread.is_alive():
             return False
+        # A dead connect thread is authoritative even if a close callback was missed.
+        self.connected = False
         if self._clock() - self._last_start_attempt < retry_interval:
             return False
         self.start()
