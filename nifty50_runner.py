@@ -259,7 +259,9 @@ def _apply_deterministic_protection(state, now, settings):
         new_stop, trigger = protective_stop(
             {"entry": pos.entry, "stop": pos.stop, "initial_stop": pos.initial_stop, "side": pos.side,
              "round_trip_cost_per_share": round_trip_cost},
-            price, one_r=float(settings["breakeven_r"]),\n            one_half_r=float(settings["profit_protection_r"]),\n            two_r=float(settings["trailing_start_r"]),
+            price, one_r=float(settings["breakeven_r"]),
+            one_half_r=float(settings["profit_protection_r"]),
+            two_r=float(settings["trailing_start_r"]),
             protected_profit_r=float(settings["protected_profit_r"]),
             atr=atr, recent_lows=lows, recent_highs=highs,
         )
