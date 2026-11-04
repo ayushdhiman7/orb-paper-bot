@@ -370,7 +370,8 @@ DEFAULT_BOT_SETTINGS = {
     "breakeven_r": 1.0, "profit_protection_r": 1.5,
     "protected_profit_r": 0.5, "trailing_start_r": 2.0,
     "square_off_time": "15:15", "stale_quote_seconds": 45,
-    "ai_position_min_confidence": 0.0, "emergency_stop": False, "paper_only": True,
+    "ai_position_min_confidence": 0.0, "emergency_stop": False,
+    "sentiment_enabled": False, "ai_position_management_enabled": True, "paper_only": True,
 }
 BOT_SETTING_RANGES = {
     "scan_interval_seconds": (60, 900), "position_review_seconds": (60, 1800),
@@ -407,7 +408,7 @@ def _validate_bot_settings(payload):
         raise HTTPException(status_code=422, detail="Unsupported settings: " + ", ".join(sorted(unknown)))
     clean = {}
     for key, value in payload.items():
-        if key == "emergency_stop":
+        if key in {"emergency_stop", "sentiment_enabled", "ai_position_management_enabled"}:
             if not isinstance(value, bool):
                 raise HTTPException(status_code=422, detail="emergency_stop must be boolean")
             clean[key] = value
