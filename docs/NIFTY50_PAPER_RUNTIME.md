@@ -14,7 +14,7 @@ It does not submit broker orders. The legacy `bot.py` entry point remains unchan
 - `SUPABASE_URL` and `SUPABASE_KEY`
 - Existing Telegram credentials if alerts are required
 - Existing paper risk settings: `CAPITAL`, `RISK_PER_TRADE_PCT`, `DAILY_LOSS_CAP_PCT`, `MAX_TRADES_PER_DAY`, `SLIPPAGE_PCT`, `COST_PCT`
-- Optional: `NIFTY50_SCAN_SECONDS` (default 180), `MAX_OPEN_POSITIONS` (default 3), `AI_MIN_ENTRY_CONFIDENCE` (default 0.65), `ANGEL_MAX_STALE_SECONDS` (default 45)
+- Optional sentiment: `SENTIMENT_SERVICE_URL`, `SENTIMENT_API_TOKEN`, `SENTIMENT_LOOKBACK_MINUTES` (default 180). News sentiment is context only, cached for five minutes, and currently supports the five reviewed aliases RELIANCE, TCS, INFY, HDFCBANK and ICICIBANK. Social sentiment is not yet connected.
 
 The runner refuses to use Yahoo prices. It skips a scan unless all 50 constituents have fresh WebSocket quote evidence. A failed universe refresh or WebSocket startup aborts startup.
 
@@ -38,7 +38,7 @@ Do not run this alongside the existing bot service. Both use the same single-ins
 
 - Actual Angel One SNAP_QUOTE entitlement, 50-token subscription acceptance, reconnect and packet freshness must be tested with the user's account during market hours.
 - The runner is not installed into the EC2 systemd unit by this code change. Do not change the production service until PR review, CI and account-level validation are complete.
-- The dashboard settings UI and live settings persistence are not included in this integration change.
+- Social-media sentiment collection still requires a supported provider/API and credentials; no scraping or terms bypass is used.
 - AI position-management actions are not yet wired into the runner; deterministic stop, target, daily loss cap, square-off and manual exit remain active.
 - The Nifty 50 sentiment service is not connected to the candidate context yet; sentiment remains optional and does not affect this runner.
 - Backtest and multi-session paper acceptance criteria require real historical/paper-session evidence and cannot be certified from unit tests alone.
