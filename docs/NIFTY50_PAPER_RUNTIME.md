@@ -4,7 +4,7 @@
 
 The opt-in runner is nifty50_runner.py. It uses the official NSE Nifty 50 constituent list, resolves Angel One NSE cash-equity tokens, subscribes through the Angel One SmartAPI WebSocket V2 SNAP_QUOTE feed, maintains completed 1-minute and 5-minute candles, requests one Gemini batch review for the complete eligible candidate set, applies deterministic risk validation, and writes approved paper entries to the existing paper_trades ledger.
 
-Open positions are reviewed as a batch by the AI position manager. Its proposed stop, target, and exit actions are validated against deterministic rules. Deterministic +1R / +1.5R / +2R protection remains active independently of AI. The dashboard exposes versioned runtime settings, manual paper exits, and an emergency stop.
+Open positions are reviewed as a batch by the AI position manager. Its proposed stop, target, and exit actions are validated against deterministic rules. Deterministic +1R / +1.5R / +2R protection remains active independently of AI. The dashboard exposes versioned runtime settings, manual paper exits, and an emergency stop. A durable once-per-session summary is persisted and delivered to Telegram and the dashboard webhook after all paper positions are closed.
 
 The runner does not submit broker orders. The legacy bot.py entry point remains separate; this is an explicit opt-in process.
 
