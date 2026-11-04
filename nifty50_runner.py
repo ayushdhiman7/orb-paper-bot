@@ -176,6 +176,8 @@ def _review_open_positions(state, now, settings):
         })
     if not positions:
         return [], []
+    if len(positions) != len(state.positions):
+        return [], [{"reason": "one_or_more_open_positions_have_no_fresh_quote"}]
     prompt, expected = build_review_prompt(positions, prices, now)
     response = llm_gate._ask(
         prompt, (), event_type="position_review", symbol="NIFTY50_POSITIONS",
@@ -253,6 +255,7 @@ def _apply_deterministic_protection(state, now, settings):
             {"entry": pos.entry, "stop": pos.stop, "side": pos.side,
              "round_trip_cost_per_share": round_trip_cost},
             price, one_r=float(settings["breakeven_r"]),\n            one_half_r=float(settings["profit_protection_r"]),\n            two_r=float(settings["trailing_start_r"]),
+            protected_profit_r=float(settings["protected_profit_r"]),
             atr=atr, recent_lows=lows, recent_highs=highs,
         )
         tighter = new_stop > pos.stop if pos.side == "BUY" else new_stop < pos.stop
@@ -284,6 +287,7 @@ def run():
     if not core.acquire_instance_lock():
         return
     core.SB = core.get_supabase()
+    core.AI_EXITS = "off"  # all Nifty 50 position decisions go through the batch manager below
     core.assert_safe_startup()
     webhook.start()
     state = core.restore_state(datetime.now(IST))
@@ -298,6 +302,7 @@ def run():
     last_scan = None
     last_position_review = None
     last_settings_refresh = time.monotonic()
+    session_date = datetime.now(IST).date()
     emergency_notified = False
     last_protection_review = None
     print(f"[NIFTY50] connected; {len(universe)} constituents; paper-only")
@@ -305,6 +310,13 @@ def run():
         while True:
             now = datetime.now(IST)
             clock = now.time()
+            if now.date() != session_date and not state.positions:
+                state = core.restore_state(now)
+                _restore_ai_levels(state)
+                session_date = now.date()
+                last_scan = None
+                last_position_review = None
+                print(f"[SESSION] restored new trading date {session_date}")
             if time.monotonic() - last_settings_refresh >= 15:
                 try:
                     latest_settings, latest_version = _load_runtime_settings()
