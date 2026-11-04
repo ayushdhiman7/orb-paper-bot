@@ -361,6 +361,16 @@ def run():
                     approved, rejected = _review_open_positions(state, now, settings)
                     if rejected:
                         print(f"[NIFTY50][AI POSITION] rejected/unavailable: {rejected}")
+                    if approved or rejected:
+                        lines = [
+                            f"{row['symbol']} {row['decision'].action} {row['decision'].confidence:.0%} APPROVED"
+                            for row in approved
+                        ]
+                        lines.extend(
+                            f"{row.get('symbol', 'PORTFOLIO')} REJECTED: {row.get('reason')}"
+                            for row in rejected
+                        )
+                        notify.send("🧠 NIFTY50 POSITION REVIEW\n" + "\n".join(lines)[:3200])
                     _apply_management_decisions(state, approved, now)
                 due = last_scan is None or (now - last_scan).total_seconds() >= int(settings["scan_interval_seconds"])
                 if due and clock < core.NO_NEW_TRADES_AFTER and not state.halted:
@@ -375,6 +385,12 @@ def run():
                         sentiment_provider=fetch_candidate_sentiment,
                     )
                     print(f"[NIFTY50] {info}")
+                    if result is not None and result.rejections:
+                        lines = [
+                            f"{row.get('symbol', 'unknown')} REJECTED: {row.get('reason', row.get('verdict', 'risk check failed'))}"
+                            for row in result.rejections
+                        ]
+                        notify.send("🛡️ NIFTY50 RISK VERDICTS\n" + "\n".join(lines)[:3200])
                     if result is not None and result.status in {"approved", "no_approved_entries"}:
                         _apply_plans(state, result, now)
                     elif result is not None:
