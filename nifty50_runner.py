@@ -291,6 +291,79 @@ def _apply_deterministic_protection(state, now, settings):
     return changed
 
 
+
+def _send_daily_report(state, now):
+    """Persist and deliver an idempotent paper-session summary after all positions close."""
+    session_date = now.date().isoformat()
+    try:
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        trades = (core.SB.table("paper_trades")
+                  .select("symbol,status,pnl,llm_decision,ai_confidence")
+                  .eq("mode", "paper").gte("ts", day_start).execute().data or [])
+        closed = [row for row in trades if row.get("status") != "open"]
+        pnls = [float(row.get("pnl") or 0.0) for row in closed]
+        net_pnl = round(sum(pnls), 2)
+        confidences = [float(row["ai_confidence"]) for row in closed if row.get("ai_confidence") is not None]
+        summary = {
+            "session_date": session_date,
+            "mode": "paper",
+            "trades": len(closed),
+            "wins": sum(value > 0 for value in pnls),
+            "losses": sum(value < 0 for value in pnls),
+            "breakeven": sum(value == 0 for value in pnls),
+            "net_pnl": net_pnl,
+            "return_pct": round(net_pnl / core.CAPITAL * 100, 4) if core.CAPITAL else 0.0,
+            "capital": round(float(core.CAPITAL), 2),
+            "ai_trade_count": sum(row.get("llm_decision") == "take" for row in closed),
+            "average_ai_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+            "symbols": sorted({str(row.get("symbol")) for row in closed if row.get("symbol")}),
+            "open_positions": len(state.positions),
+            "state_day_pnl": round(float(state.day_pnl), 2),
+        }
+        existing = (core.SB.table("bot_session_reports")
+                    .select("summary,telegram_sent_at,webhook_queued_at")
+                    .eq("session_date", session_date).limit(1).execute().data or [])
+        if not existing:
+            inserted = (core.SB.table("bot_session_reports").insert({
+                "session_date": session_date, "summary": summary,
+                "created_at": now.isoformat(), "updated_at": now.isoformat(),
+            }).select("summary,telegram_sent_at,webhook_queued_at").execute().data or [])
+            existing = inserted
+        if not existing:
+            raise RuntimeError("daily report row was not confirmed")
+        report = existing[0]
+        stored_summary = report.get("summary") or summary
+        updates = {}
+        message = (
+            f"📊 NIFTY50 PAPER DAILY REPORT · {session_date}\n"
+            f"Trades: {stored_summary.get('trades', 0)} | "
+            f"W/L/BE: {stored_summary.get('wins', 0)}/{stored_summary.get('losses', 0)}/{stored_summary.get('breakeven', 0)}\n"
+            f"Net P&L: ₹{float(stored_summary.get('net_pnl') or 0):+.2f} "
+            f"({float(stored_summary.get('return_pct') or 0):+.2f}%)\n"
+            f"AI entries: {stored_summary.get('ai_trade_count', 0)} | "
+            f"Avg confidence: {float(stored_summary['average_ai_confidence']):.0%}" if stored_summary.get("average_ai_confidence") is not None
+            else f"📊 NIFTY50 PAPER DAILY REPORT · {session_date}\n"
+                 f"Trades: {stored_summary.get('trades', 0)} | "
+                 f"W/L/BE: {stored_summary.get('wins', 0)}/{stored_summary.get('losses', 0)}/{stored_summary.get('breakeven', 0)}\n"
+                 f"Net P&L: ₹{float(stored_summary.get('net_pnl') or 0):+.2f} "
+                 f"({float(stored_summary.get('return_pct') or 0):+.2f}%)\n"
+                 f"AI entries: {stored_summary.get('ai_trade_count', 0)} | Avg confidence: n/a"
+        )
+        message += f"\nOpen positions: {stored_summary.get('open_positions', 0)} | Mode: PAPER"
+        if notify.configured() and not report.get("telegram_sent_at") and notify.send(message):
+            updates["telegram_sent_at"] = now.isoformat()
+        if not report.get("webhook_queued_at") and webhook.emit("session.summary", now, stored_summary):
+            updates["webhook_queued_at"] = now.isoformat()
+        if updates:
+            (core.SB.table("bot_session_reports").update({
+                **updates, "updated_at": now.isoformat(),
+            }).eq("session_date", session_date).execute())
+        return True
+    except Exception as exc:
+        print(f"[NIFTY50] daily report deferred ({type(exc).__name__})")
+        return False
+
+
 def run():
     if os.getenv("ORB_RUNTIME_MODE", "").strip().lower() != "nifty50_batch":
         raise RuntimeError("Set ORB_RUNTIME_MODE=nifty50_batch explicitly to run this entry point")
@@ -313,6 +386,7 @@ def run():
     last_position_review = None
     last_settings_refresh = time.monotonic()
     session_date = datetime.now(IST).date()
+    last_daily_report_attempt = None
     print(f"[NIFTY50] connected; {len(universe)} constituents; paper-only")
     try:
         while True:
@@ -330,6 +404,7 @@ def run():
                 session_date = now.date()
                 last_scan = None
                 last_position_review = None
+                last_daily_report_attempt = None
                 print(f"[SESSION] restored new trading date {session_date}")
             if time.monotonic() - last_settings_refresh >= 15:
                 try:
@@ -351,7 +426,10 @@ def run():
                         price = core.last_price(symbol)
                         if price is not None:
                             core.close_position(state, symbol, price, "square_off", now)
-                if clock > core.MARKET_CLOSE and not state.positions:
+                if now.weekday() < 5 and clock > core.MARKET_CLOSE and not state.positions:
+                    if last_daily_report_attempt is None or (now - last_daily_report_attempt).total_seconds() >= 60:
+                        _send_daily_report(state, now)
+                        last_daily_report_attempt = now
                     time.sleep(300)
                 else:
                     time.sleep(30)
