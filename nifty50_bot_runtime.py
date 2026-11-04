@@ -38,23 +38,24 @@ def start_feed():
 
 
 def scan_batch(universe, feed, now, state, *, review_batch, capital, risk_pct,
-               daily_loss_pct, max_trades, slippage_pct, cost_pct):
+               daily_loss_pct, max_trades, slippage_pct, cost_pct, settings=None):
     if not isinstance(universe, list) or len(universe) != 50:
         raise RuntimeError("Nifty 50 universe must contain exactly 50 instruments")
     missing = [row["symbol"] for row in universe if feed.quote(row["symbol"], now) is None]
     if missing:
         return None, {"status": "stale_feed", "missing_quotes": len(missing)}
+    settings = settings or {}
     limits = PortfolioLimits(
         capital=capital,
         available_cash=state.cash,
         risk_per_trade_pct=risk_pct,
-        max_positions=int(os.getenv("MAX_OPEN_POSITIONS", "3")),
+        max_positions=int(settings.get("max_open_positions", os.getenv("MAX_OPEN_POSITIONS", "2"))),
         open_positions=len(state.positions),
         max_trades_per_day=max_trades,
         trades_today=state.trades_today,
         daily_loss_cap_pct=daily_loss_pct,
         day_pnl=state.day_pnl,
-        min_confidence=float(os.getenv("AI_MIN_ENTRY_CONFIDENCE", "0.65")),
+        min_confidence=float(settings.get("ai_entry_min_confidence", os.getenv("AI_MIN_ENTRY_CONFIDENCE", "0"))),
     )
     result = run_batch_cycle(
         universe, feed, now, limits, review_batch=review_batch,
