@@ -435,6 +435,23 @@ def _validate_bot_settings(payload):
     return clean
 
 
+def _validate_setting_relationships(settings):
+    breakeven = float(settings["breakeven_r"])
+    profit_trigger = float(settings["profit_protection_r"])
+    protected_profit = float(settings["protected_profit_r"])
+    trailing_start = float(settings["trailing_start_r"])
+    if not breakeven < profit_trigger < trailing_start:
+        raise HTTPException(
+            status_code=422,
+            detail="R thresholds must satisfy breakeven_r < profit_protection_r < trailing_start_r",
+        )
+    if not 0 < protected_profit < profit_trigger:
+        raise HTTPException(
+            status_code=422,
+            detail="protected_profit_r must be positive and below profit_protection_r",
+        )
+
+
 @app.get("/api/settings")
 async def get_bot_settings():
     return await run_in_threadpool(_read_bot_settings)
@@ -453,6 +470,7 @@ async def update_bot_settings(request: Request):
     clean = _validate_bot_settings(payload)
     current = await run_in_threadpool(_read_bot_settings)
     merged = {**current["settings"], **clean, "paper_only": True}
+    _validate_setting_relationships(merged)
     def persist():
         return (_settings_client().table("orb_bot_settings").update({
             "settings": merged, "version": int(current["version"]) + 1,
