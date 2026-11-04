@@ -2,46 +2,74 @@
 
 ## Scope
 
-The opt-in runner is `nifty50_runner.py`. It uses the official NSE Nifty 50 constituent list, resolves Angel One NSE cash-equity tokens, subscribes through the Angel One SmartAPI WebSocket V2 SNAP_QUOTE feed, collects completed 5-minute candles, requests one Gemini batch review for the complete eligible candidate set, applies deterministic risk validation and writes approved paper entries to `paper_trades`.
+The opt-in runner is nifty50_runner.py. It uses the official NSE Nifty 50 constituent list, resolves Angel One NSE cash-equity tokens, subscribes through the Angel One SmartAPI WebSocket V2 SNAP_QUOTE feed, maintains completed 1-minute and 5-minute candles, requests one Gemini batch review for the complete eligible candidate set, applies deterministic risk validation, and writes approved paper entries to the existing paper_trades ledger.
 
-It does not submit broker orders. The legacy `bot.py` entry point remains unchanged; the new runner is a separate opt-in process.
+Open positions are reviewed as a batch by the AI position manager. Its proposed stop, target, and exit actions are validated against deterministic rules. Deterministic +1R / +1.5R / +2R protection remains active independently of AI. The dashboard exposes versioned runtime settings, manual paper exits, and an emergency stop.
+
+The runner does not submit broker orders. The legacy bot.py entry point remains separate; this is an explicit opt-in process.
+
+## Market data
+
+- Angel One SmartAPI WebSocket V2 SNAP_QUOTE mode (3), NSE cash exchange type (1).
+- The universe must contain exactly 50 unique current NSE constituents with unique Angel One cash tokens.
+- Quotes must have fresh receive and exchange timestamps. Stale/disconnected quotes are rejected.
+- There is no Yahoo fallback in this runtime.
+- The SDK has bounded reconnect attempts; if its connection thread exits, the runner attempts a fresh login and resubscription after a 30-second backoff.
+- A full market-session test with the actual account is still required to prove entitlement and packet coverage.
 
 ## Required environment
 
-- `ORB_RUNTIME_MODE=nifty50_batch` (explicit opt-in guard)
-- Existing Angel One credentials: `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET` (the names are read by `angel_feed.py`)
-- `GEMINI_API_KEY`
-- `SUPABASE_URL` and `SUPABASE_KEY`
-- Existing Telegram credentials if alerts are required
-- Existing paper risk settings: `CAPITAL`, `RISK_PER_TRADE_PCT`, `DAILY_LOSS_CAP_PCT`, `MAX_TRADES_PER_DAY`, `SLIPPAGE_PCT`, `COST_PCT`
-- Optional sentiment: `SENTIMENT_SERVICE_URL`, `SENTIMENT_API_TOKEN`, `SENTIMENT_LOOKBACK_MINUTES` (default 180). News sentiment is context only, cached for five minutes, and currently supports the five reviewed aliases RELIANCE, TCS, INFY, HDFCBANK and ICICIBANK. Social sentiment is not yet connected.
+- ORB_RUNTIME_MODE=nifty50_batch (explicit opt-in guard)
+- Angel One credentials: ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_PIN, ANGEL_TOTP_SECRET
+- GEMINI_API_KEY (optional GEMINI_MODEL override)
+- SUPABASE_URL and SUPABASE_KEY
+- Telegram credentials if alerts are required: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+- Existing paper sizing settings: CAPITAL, SLIPPAGE_PCT, COST_PCT
+- Optional sentiment: SENTIMENT_SERVICE_URL and optional SENTIMENT_API_TOKEN
 
-The runner refuses to use Yahoo prices. It requires the WebSocket to remain connected, then evaluates each constituent independently and admits only symbols with fresh quote evidence. One inactive constituent does not block otherwise valid candidates. A failed universe refresh or WebSocket startup aborts startup.
+The dashboard-managed settings table controls risk per trade, daily loss cap, max open positions, max trades, scan interval, position review interval, stale quote tolerance, R-based protection thresholds, AI position confidence, forced square-off, sentiment enablement, AI position-management enablement, and emergency stop. Paper-only mode cannot be disabled.
 
-## Database migration
+## Sentiment
 
-Before running the new runner, apply `supabase/migrations/202611040001_nifty50_ai_trade_levels.sql`. This adds nullable columns for the AI-selected stop, target, confidence and rank. The runner persists those values with each AI-approved paper entry and restores them on restart.
+Google News RSS plus FinTwitBERT is optional context only. It is requested only for already-qualified candidates and cannot create, remove, reverse, or veto ORB signals. The current reviewed alias list supports RELIANCE, TCS, INFY, HDFCBANK, and ICICIBANK. News and social scores are represented separately; social remains unavailable until a permitted source is approved and configured.
 
-The separate manual-exit migration from PR #20 must also be applied before manual-exit requests can work. Confirm the actual Supabase `paper_trades.id` type matches the `manual_exit_requests.trade_id` type before applying it.
+The selected social source is Reddit, subject to explicit Reddit Data API approval and OAuth credentials. No X API integration or page scraping is included. See docs/NIFTY50_PAPER_RUNBOOK.md for the current access gate.
 
-## Install runtime dependencies\n\nInstall the repository requirements and the pinned Angel One WebSocket dependencies before starting:\n\n```bash\npip install -r requirements.txt -r requirements-angelone-test.txt\n```\n\nThe sentiment service is deployed separately from the bot and is optional.\n\n## Start command\n
-After reviewing the code and applying the required migrations/configuration, the process entry point is:
+## Database migrations
 
-```bash
-ORB_RUNTIME_MODE=nifty50_batch python nifty50_runner.py
-```
+Apply pending migrations in timestamp order using the approved Supabase process. This repository change does not execute them:
 
-Do not run this alongside the existing bot service. Both use the same single-instance lock and the second process should exit.
+1. supabase/migrations/202611030001_manual_exit_requests.sql
+2. supabase/migrations/202611040001_nifty50_ai_trade_levels.sql
+3. supabase/migrations/202611040002_orb_bot_settings.sql
+4. supabase/migrations/202611040003_initial_stop.sql
 
-## Not yet validated
+Verify schema and type compatibility before enabling the runner. The original stop is persisted separately from the active protective stop so R calculations remain stable after AI stop changes and process restarts.
 
-- Actual Angel One SNAP_QUOTE entitlement, 50-token subscription acceptance, reconnect and packet freshness must be tested with the user's account during market hours.
-- The runner is not installed into the EC2 systemd unit by this code change. Do not change the production service until PR review, CI and account-level validation are complete.
-- Social-media sentiment collection still requires a supported provider/API and credentials; no scraping or terms bypass is used.
-- AI position-management actions are not yet wired into the runner; deterministic stop, target, daily loss cap, square-off and manual exit remain active.
-- The Nifty 50 sentiment service is not connected to the candidate context yet; sentiment remains optional and does not affect this runner.
-- Backtest and multi-session paper acceptance criteria require real historical/paper-session evidence and cannot be certified from unit tests alone.
+## Install and start
 
-## Safety
+Install the repository requirements, which include the pinned SmartAPI and pyotp dependencies:
 
-Paper-only. No broker order methods are used. Gemini output is never executed directly: it must pass the deterministic validator and final paper sizing checks. Any missing feed, invalid batch, quota/audit failure or persistence error prevents new entries.
+    pip install -r requirements.txt
+
+After applying migrations, configuring private environment variables, and completing the real-account SNAP_QUOTE acceptance test, start the opt-in runner:
+
+    ORB_RUNTIME_MODE=nifty50_batch python nifty50_runner.py
+
+Do not run this alongside the legacy bot service. Both use the same single-instance lock and the second process should exit.
+
+## Validation state
+
+Automated coverage includes universe validation, feed freshness, WebSocket subscription and reconnect supervision, batch candidate validation, paper sizing, stop protection for long and short positions, AI position batch parsing, dashboard setting validation, manual-exit safeguards, and paper-entry persistence.
+
+The following remain operator acceptance steps and are not proven by mocked CI:
+- Actual Angel One SNAP_QUOTE entitlement and fresh packet receipt using the account's API key, JWT and feed token.
+- Full-session symbol coverage and disconnect/reconnect behavior during NSE market hours.
+- Applying and verifying the pending Supabase migrations.
+- Several separate paper sessions reviewing ledger reconciliation, costs, duplicate prevention, stop/target behavior and restart restoration.
+
+## Safety and rollout
+
+Paper-only. No broker order methods are used. Gemini output is never executed directly: it must pass deterministic validation and final paper sizing. Missing feed data, invalid or incomplete AI batches, quota/audit failures, or persistence errors prevent new entries.
+
+The PR does not install or switch the EC2 systemd service and does not deploy to EC2. Do not merge to main until the operator-owned acceptance steps are complete; a push to main can trigger the dashboard deployment workflow.
