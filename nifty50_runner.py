@@ -15,7 +15,9 @@ import bot as core
 import llm_gate
 import notify
 import webhook
-from batch_entry import PortfolioLimits
+from nifty50_position_manager import (
+    build_review_prompt, parse_management_batch, protective_stop, validate_management_batch,
+)
 from nifty50_bot_runtime import scan_batch, start_feed
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -103,6 +105,121 @@ def _apply_plans(state, result, now):
         })
 
 
+
+def _review_open_positions(state, now):
+    positions = []
+    prices = {}
+    for symbol, pos in state.positions.items():
+        price = core.last_price(symbol)
+        if price is None:
+            continue
+        prices[symbol] = price
+        positions.append({
+            "symbol": symbol, "side": pos.side, "qty": pos.qty, "entry": pos.entry,
+            "stop": pos.stop, "target": pos.target, "opened_at": pos.opened_at,
+            "peak_price": pos.peak or price,
+        })
+    if not positions:
+        return [], []
+    prompt, expected = build_review_prompt(positions, prices, now)
+    response = llm_gate._ask(
+        prompt, (), event_type="position_review", symbol="NIFTY50_POSITIONS",
+        parser=lambda raw: parse_management_batch(raw, expected),
+        audit_decision="batch",
+    )
+    if not response:
+        return [], [{"reason": "ai_unavailable"}]
+    return validate_management_batch(
+        positions, prices, now, response,
+        min_confidence=float(os.getenv("AI_POSITION_MIN_CONFIDENCE", "0")),
+    )
+
+
+def _apply_management_decisions(state, approved, now):
+    for item in approved:
+        symbol = item["symbol"]
+        pos = state.positions.get(symbol)
+        if pos is None:
+            continue
+        decision = item["decision"]
+        action = decision.action
+        if action == "HOLD":
+            continue
+        if action == "EXIT":
+            price = core.last_price(symbol)
+            if price is not None:
+                core.close_position(state, symbol, price, "ai_exit", now, note=decision.reason)
+            continue
+        changes = {}
+        if action in {"MOVE_SL", "LOCK_PROFIT"} and decision.new_stop is not None:
+            pos.stop = float(decision.new_stop)
+            changes["stop"] = round(pos.stop, 4)
+        if action == "UPDATE_TARGET" and decision.new_target is not None:
+            pos.target = float(decision.new_target)
+            changes["target"] = round(pos.target, 4)
+        if changes:
+            try:
+                rows = (core.SB.table("paper_trades").update(changes)
+                        .eq("id", pos.row_id).eq("status", "open")
+                        .select("id").execute().data or [])
+                if not rows:
+                    raise RuntimeError("Supabase did not confirm position-level update")
+            except Exception as exc:
+                state.halted = True
+                notify.send("🛑 HALT: Could not persist AI position update; no new entries")
+                print(f"[HALT] position update persistence failed ({type(exc).__name__})")
+                continue
+            notify.send(
+                f"🧠 AI POSITION {action} {symbol} | confidence {decision.confidence:.0%} "
+                f"| SL {pos.stop:.2f} TP {pos.target:.2f} | {decision.reason}"
+            )
+            webhook.emit("risk.alert", now, {
+                "symbol": symbol, "action": action, "confidence": decision.confidence,
+                "stop": pos.stop, "target": pos.target, "reason": decision.reason,
+                "mode": "paper",
+            })
+
+
+def _apply_deterministic_protection(state, now):
+    """Apply agreed +1R/+1.5R/+2R protections before normal stop/target checks."""
+    from indicators import calculate_indicators
+    for symbol, pos in list(state.positions.items()):
+        price = core.last_price(symbol)
+        if price is None:
+            continue
+        candles = core.FEED.candles(symbol) if core.FEED is not None else []
+        snapshot = calculate_indicators(candles, ema_period=20, atr_period=14) if len(candles) >= 15 else None
+        atr = snapshot.atr14 if snapshot is not None else None
+        lows = [row["low"] for row in candles[-5:]]
+        highs = [row["high"] for row in candles[-5:]]
+        round_trip_cost = core.fee_for_notional(pos.qty * pos.entry) * 2 / max(pos.qty, 1)
+        new_stop, trigger = protective_stop(
+            {"entry": pos.entry, "stop": pos.stop, "side": pos.side,
+             "round_trip_cost_per_share": round_trip_cost},
+            price, one_r=1.0, one_half_r=1.5, two_r=2.0,
+            atr=atr, recent_lows=lows, recent_highs=highs,
+        )
+        tighter = new_stop > pos.stop if pos.side == "BUY" else new_stop < pos.stop
+        if not tighter:
+            continue
+        pos.stop = new_stop
+        try:
+            rows = (core.SB.table("paper_trades").update({"stop": round(pos.stop, 4)})
+                    .eq("id", pos.row_id).eq("status", "open").select("id").execute().data or [])
+            if not rows:
+                raise RuntimeError("stop update was not confirmed")
+        except Exception as exc:
+            state.halted = True
+            notify.send("🛑 HALT: Profit-protection stop could not be persisted")
+            print(f"[HALT] deterministic stop persistence failed ({type(exc).__name__})")
+            continue
+        notify.send(f"🔒 {symbol} {trigger}: protective stop tightened to {pos.stop:.2f}")
+        webhook.emit("risk.alert", now, {
+            "symbol": symbol, "action": trigger, "stop": pos.stop,
+            "mode": "paper", "risk_verdict": "APPROVED",
+        })
+
+
 def run():
     if os.getenv("ORB_RUNTIME_MODE", "").strip().lower() != "nifty50_batch":
         raise RuntimeError("Set ORB_RUNTIME_MODE=nifty50_batch explicitly to run this entry point")
@@ -119,6 +236,7 @@ def run():
     core.last_price = lambda symbol: feed.last(symbol, datetime.now(IST))
     notify.send("🚀 NIFTY50 batch paper runner started | Angel WebSocket | paper-only")
     last_scan = None
+    last_position_review = None
     print(f"[NIFTY50] connected; {len(universe)} constituents; paper-only")
     try:
         while True:
@@ -143,8 +261,19 @@ def run():
                     if price is not None:
                         core.close_position(state, symbol, price, "square_off", now)
             elif clock >= core.RANGE_END:
+                _apply_deterministic_protection(state, now)
                 core.manage_positions(state, now)
                 core.check_daily_cap(state)
+                review_due = bool(state.positions) and (
+                    last_position_review is None or
+                    (now - last_position_review).total_seconds() >= int(os.getenv("AI_POSITION_REVIEW_SECONDS", "300"))
+                )
+                if review_due and not state.halted:
+                    last_position_review = now
+                    approved, rejected = _review_open_positions(state, now)
+                    if rejected:
+                        print(f"[NIFTY50][AI POSITION] rejected/unavailable: {rejected}")
+                    _apply_management_decisions(state, approved, now)
                 due = last_scan is None or (now - last_scan).total_seconds() >= int(os.getenv("NIFTY50_SCAN_SECONDS", "180"))
                 if due and clock < core.NO_NEW_TRADES_AFTER and not state.halted:
                     last_scan = now
