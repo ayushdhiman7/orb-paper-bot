@@ -23,7 +23,12 @@ Provide these values through the existing private environment file / systemd env
 
 The accepted Angel credential aliases are defined in angel_feed.py. The WebSocket runtime uses SmartAPI V2 SNAP_QUOTE (mode 3) for NSE cash (exchange type 1). Python dependencies for the SmartAPI client are included through requirements-angelone-test.txt, referenced by requirements.txt.
 
-## Database migrations — manual operator step
+## Database migrations — project status
+
+The connected Supabase project `gbqmvnekxsckzjzcorac` was updated on 2026-11-04. The five migrations listed below were applied successfully through the Supabase migration API and verified in migration history and schema inspection. The settings row was verified with `paper_only=true`, 1% risk per trade, and 2% daily loss cap. Existing paper ledger data was preserved.
+
+For a different environment or a fresh project, apply these migrations in timestamp order using the project's approved Supabase process:
+
 
 Apply pending SQL migrations in timestamp order using the project's approved Supabase process. This repository change does not execute migrations:
 
