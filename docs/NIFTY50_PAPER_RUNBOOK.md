@@ -73,6 +73,13 @@ Record the account's successful login, subscription callback, fresh quote count,
 
 The SDK uses its bounded reconnect attempts. If its connection thread exits, the runner supervises it and attempts a fresh login/subscription after a 30-second backoff. During disconnect/reconnect, stale quotes remain invalid and entries remain blocked. Validate this with the account and network conditions before production-like paper sessions.
 
+
+## Sentiment source scope
+
+The currently wired runtime sentiment client is optional, cached Google News RSS context for the five reviewed aliases in sentiment_client.py. It is passed only for already-qualified ORB candidates and cannot create, remove, reverse, or veto an ORB signal. The service reports news and social fields separately; social remains unavailable until an approved source is configured.
+
+The planned free social source is Reddit, not X. Do not scrape Reddit pages or call the Data API until the app has explicit access approval and OAuth credentials. Reddit's current Data API guidance requires OAuth and says developers must request access; it also requires honoring deletion requests and API rate limits. See the [Reddit Data API Wiki](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki), [Developer Platform & Accessing Reddit Data](https://support.reddithelp.com/hc/en-us/articles/14945211791892-Developer-Platform-Accessing-Reddit-Data), and [Data API Terms](https://redditinc.com/policies/data-api-terms). No X API integration is planned because the selected source constraint was free-only.
+
 ## Start the opt-in paper runner
 
 Only after migrations and the real-account acceptance test pass:
