@@ -71,6 +71,8 @@ export type BotSettings = {
   stale_quote_seconds: number;
   ai_position_min_confidence: number;
   emergency_stop: boolean;
+  sentiment_enabled: boolean;
+  ai_position_management_enabled: boolean;
   paper_only: true;
 };
 export type BotSettingsResponse = { settings: BotSettings; version: number; updated_at: string };
