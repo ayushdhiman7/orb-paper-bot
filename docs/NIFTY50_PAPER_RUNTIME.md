@@ -43,6 +43,7 @@ Apply pending migrations in timestamp order using the approved Supabase process.
 2. supabase/migrations/202611040001_nifty50_ai_trade_levels.sql
 3. supabase/migrations/202611040002_orb_bot_settings.sql
 4. supabase/migrations/202611040003_initial_stop.sql
+5. supabase/migrations/202611040004_bot_session_reports.sql
 
 Verify schema and type compatibility before enabling the runner. The original stop is persisted separately from the active protective stop so R calculations remain stable after AI stop changes and process restarts.
 
