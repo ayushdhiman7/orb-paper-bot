@@ -106,6 +106,11 @@ def _apply_plans(state, result, now):
 
 
 
+def feed_candles_1m(symbol):
+    feed = core.FEED
+    return feed.candles_1m(symbol) if feed is not None and hasattr(feed, "candles_1m") else []
+
+
 def _review_open_positions(state, now):
     positions = []
     prices = {}
@@ -118,6 +123,7 @@ def _review_open_positions(state, now):
             "symbol": symbol, "side": pos.side, "qty": pos.qty, "entry": pos.entry,
             "stop": pos.stop, "target": pos.target, "opened_at": pos.opened_at,
             "peak_price": pos.peak or price,
+            "candles_1m": feed_candles_1m(symbol),
         })
     if not positions:
         return [], []
@@ -237,6 +243,7 @@ def run():
     notify.send("🚀 NIFTY50 batch paper runner started | Angel WebSocket | paper-only")
     last_scan = None
     last_position_review = None
+    last_protection_review = None
     print(f"[NIFTY50] connected; {len(universe)} constituents; paper-only")
     try:
         while True:
