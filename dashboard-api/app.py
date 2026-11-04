@@ -425,6 +425,8 @@ def _validate_bot_settings(payload):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise HTTPException(status_code=422, detail=f"{key} must be numeric")
             low, high = BOT_SETTING_RANGES[key]
+            if key in {"scan_interval_seconds", "position_review_seconds", "max_open_positions", "max_trades_per_day", "stale_quote_seconds"} and not float(value).is_integer():
+                raise HTTPException(status_code=422, detail=f"{key} must be an integer")
             if not low <= float(value) <= high:
                 raise HTTPException(status_code=422, detail=f"{key} must be between {low} and {high}")
             clean[key] = int(value) if key in {"scan_interval_seconds", "position_review_seconds",
