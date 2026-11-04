@@ -73,3 +73,31 @@ def test_two_r_trailing_uses_tighter_of_atr_and_swing_support():
     )
     assert stop == 103.0
     assert trigger == "trail_2r"
+
+
+def test_short_profit_protection_locks_net_half_r_after_costs():
+    pos = {
+        "entry": 100.0, "stop": 102.0, "initial_stop": 102.0, "side": "SELL",
+        "round_trip_cost_per_share": 0.1,
+    }
+    stop, trigger = protective_stop(
+        pos, 97.0, one_r=1.0, one_half_r=1.5, two_r=2.0,
+        protected_profit_r=0.5,
+    )
+    assert stop <= 98.9
+    assert trigger == "protect_0_5r"
+
+
+def test_profit_protection_never_places_stop_through_market_or_widens_risk():
+    long_stop, _ = protective_stop(
+        {"entry": 100.0, "stop": 98.0, "initial_stop": 98.0, "side": "BUY"},
+        100.5, one_r=1.0, one_half_r=1.5, two_r=2.0,
+    )
+    short_stop, _ = protective_stop(
+        {"entry": 100.0, "stop": 102.0, "initial_stop": 102.0, "side": "SELL"},
+        99.5, one_r=1.0, one_half_r=1.5, two_r=2.0,
+    )
+    assert long_stop >= 98.0
+    assert long_stop < 100.5
+    assert short_stop <= 102.0
+    assert short_stop > 99.5
