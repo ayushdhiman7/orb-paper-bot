@@ -31,6 +31,7 @@ Apply pending SQL migrations in timestamp order using the project's approved Sup
 2. supabase/migrations/202611040001_nifty50_ai_trade_levels.sql
 3. supabase/migrations/202611040002_orb_bot_settings.sql
 4. supabase/migrations/202611040003_initial_stop.sql
+5. supabase/migrations/202611040004_bot_session_reports.sql
 
 The initial-stop migration is idempotent. It backfills legacy rows from their current stop as the safest available baseline; new Nifty 50 entries persist the true original stop. Verify that paper_trades.initial_stop, paper_trades.stop, paper_trades.target, paper_trades.ai_confidence, paper_trades.ai_rank, manual_exit_requests, and orb_bot_settings exist before starting the runner.
 
