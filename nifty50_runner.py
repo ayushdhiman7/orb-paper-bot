@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "protected_profit_r": 0.5, "trailing_start_r": 2.0,
     "square_off_time": "15:15", "stale_quote_seconds": 45,
     "ai_position_min_confidence": 0.0, "emergency_stop": False,
+    "sentiment_enabled": False, "ai_position_management_enabled": True,
     "paper_only": True,
 }
 
@@ -352,7 +353,7 @@ def run():
                 protection_event = _apply_deterministic_protection(state, now, settings)
                 core.manage_positions(state, now)
                 core.check_daily_cap(state)
-                review_due = bool(state.positions) and (protection_event or
+                review_due = bool(settings.get("ai_position_management_enabled", True)) and bool(state.positions) and (protection_event or
                     last_position_review is None or
                     (now - last_position_review).total_seconds() >= int(settings["position_review_seconds"])
                 )
@@ -382,7 +383,7 @@ def run():
                         max_trades=core.MAX_TRADES_PER_DAY,
                         slippage_pct=core.SLIPPAGE_PCT, cost_pct=core.COST_PCT,
                         settings=settings, day_pnl=core.marked_day_pnl(state),
-                        sentiment_provider=fetch_candidate_sentiment,
+                        sentiment_provider=fetch_candidate_sentiment if settings.get("sentiment_enabled") else None,
                     )
                     print(f"[NIFTY50] {info}")
                     if result is not None and result.rejections:
