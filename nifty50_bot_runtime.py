@@ -38,7 +38,7 @@ def start_feed():
 
 
 def scan_batch(universe, feed, now, state, *, review_batch, capital, risk_pct,
-               daily_loss_pct, max_trades, slippage_pct, cost_pct, settings=None, day_pnl=None):
+               daily_loss_pct, max_trades, slippage_pct, cost_pct, settings=None, day_pnl=None, sentiment_provider=None):
     if not isinstance(universe, list) or len(universe) != 50:
         raise RuntimeError("Nifty 50 universe must contain exactly 50 instruments")
     missing = [row["symbol"] for row in universe if feed.quote(row["symbol"], now) is None]
@@ -59,6 +59,7 @@ def scan_batch(universe, feed, now, state, *, review_batch, capital, risk_pct,
     )
     result = run_batch_cycle(
         universe, feed, now, limits, review_batch=review_batch,
+        sentiment_provider=sentiment_provider,
         slippage_pct=slippage_pct, cost_pct=cost_pct,
     )
     return result, {"status": result.status, "candidates": len(result.candidates),
