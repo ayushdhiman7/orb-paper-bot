@@ -142,6 +142,23 @@ def test_restarts_websocket_only_after_sdk_thread_exits_and_backoff_elapses(monk
     assert feed.restart_if_stopped(retry_interval=30) is True
     assert calls == ["start"]
 
+    feed._thread = ThreadState(True)
     feed.connected = True
     assert feed.restart_if_stopped(retry_interval=30) is False
     assert calls == ["start"]
+
+
+def test_dead_websocket_thread_invalidates_connected_flag_during_backoff():
+    clock = [1000.0]
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0])
+
+    class DeadThread:
+        def is_alive(self):
+            return False
+
+    feed._thread = DeadThread()
+    feed.connected = True
+    feed._last_start_attempt = 1000.0
+
+    assert feed.restart_if_stopped(retry_interval=30) is False
+    assert feed.connected is False
