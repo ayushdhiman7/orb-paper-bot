@@ -335,3 +335,18 @@ def test_manual_exit_request_stays_pending_without_fresh_price(monkeypatch):
     bot.process_manual_exit_requests(state, NOW)
     assert "TCS.NS" in state.positions
     assert fake.updates == []
+
+
+
+def test_position_accepts_nifty50_ai_metadata_and_keeps_initial_stop():
+    from bot import Position
+
+    position = Position(
+        "RELIANCE", "BUY", 2, 100.0, 98.0, 104.0,
+        datetime.now(IST), ai_confidence=0.91, ai_rank=1,
+    )
+    position.stop = 100.1
+
+    assert position.ai_confidence == 0.91
+    assert position.ai_rank == 1
+    assert position.initial_stop == 98.0
