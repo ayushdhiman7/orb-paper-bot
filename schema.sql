@@ -110,3 +110,15 @@ values (1, '{
 }'::jsonb, 1)
 on conflict (id) do nothing;
 alter table orb_bot_settings enable row level security;
+
+
+-- Durable delivery state for the once-per-session paper daily report.
+create table if not exists bot_session_reports (
+  session_date date primary key,
+  summary jsonb not null,
+  telegram_sent_at timestamptz,
+  webhook_queued_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table bot_session_reports enable row level security;
