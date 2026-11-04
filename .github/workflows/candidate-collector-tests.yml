@@ -1,0 +1,19 @@
+name: candidate-collector-tests
+
+on:
+  push:
+    branches: ["phase2/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  candidate-collector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: python -m pytest -q test_candidate_collector.py test_nifty_universe.py test_indicators.py test_angel_websocket.py
