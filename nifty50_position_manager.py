@@ -104,11 +104,12 @@ def validate_management_batch(positions, prices, now, response, min_confidence=0
 
 
 def protective_stop(position, price, *, one_r, one_half_r, two_r, protected_profit_r=0.5, atr=None, recent_lows=(), recent_highs=()):
-    """Return a tighter stop at +1R/+1.5R/+2R; never increase initial risk."""
+    """Return a tighter stop using immutable entry risk, not the already-tightened stop."""
     entry = float(position["entry"])
     stop = float(position["stop"])
+    initial_stop = float(position.get("initial_stop", stop))
     direction = 1 if position["side"] == "BUY" else -1
-    risk = abs(entry - stop)
+    risk = abs(entry - initial_stop)
     if risk <= 0:
         return stop, None
     current_r = (float(price) - entry) * direction / risk
