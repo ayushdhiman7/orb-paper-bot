@@ -89,6 +89,15 @@ The runner checks the exact 50-member NSE constituent list against Angel One's c
 
 Runtime settings are stored in orb_bot_settings and refreshed by the runner every 15 seconds. The dashboard's Settings page controls scan cadence, risk caps, position limits, R-based protection, AI review confidence, sentiment context, square-off, stale-quote tolerance, and the emergency stop. Paper-only execution is not configurable.
 
+
+## Phase 9 — backtest and paper-session acceptance
+
+The repository's existing backtest.py is a legacy ORB smoke-test over a short Yahoo 5-minute history window and defaults to five symbols. It is not a validated historical simulation of the new AI-ranked Nifty 50 batch runner. Do not label it as Phase 9 sign-off.
+
+Before claiming historical validation for the Nifty 50 runtime, use a point-in-time constituent universe and timestamp-correct historical candles. Do not apply today's Nifty 50 membership retrospectively (survivorship bias), and do not use current Google News RSS or live social posts as historical sentiment (look-ahead bias). Use archived sentiment snapshots or keep sentiment disabled in the historical test.
+
+The final comparison must run the same market data and cost model across the deterministic ORB baseline and AI-assisted variant, including adverse entry/exit slippage, brokerage/taxes, max two simultaneous positions, 1% maximum capital risk per trade, 2% daily loss cap, and the 15:15 square-off. Report chronological train/test results, total trades, expectancy, win rate, profit factor, maximum drawdown, net P&L after costs, per-symbol performance, and daily-cap/square-off compliance. Then reconcile those results against several separate live-feed paper sessions before any deployment decision.
+
 ## Acceptance checklist before calling Phase 3 operational
 
 - [ ] CI is green on the exact PR head commit.
