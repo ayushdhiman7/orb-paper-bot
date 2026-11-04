@@ -56,8 +56,6 @@ Run from the repository virtual environment during NSE market hours:
                 quote = feed.quote(row["symbol"], now)
                 if quote is not None:
                     fresh[row["symbol"]] = quote
-            if fresh:
-                break
             time.sleep(1)
         print(f"Universe: {len(universe)}")
         print(f"Fresh SNAP_QUOTE symbols observed: {len(fresh)}")
