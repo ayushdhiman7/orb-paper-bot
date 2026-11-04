@@ -370,7 +370,7 @@ def run():
                         daily_loss_pct=core.DAILY_LOSS_CAP_PCT,
                         max_trades=core.MAX_TRADES_PER_DAY,
                         slippage_pct=core.SLIPPAGE_PCT, cost_pct=core.COST_PCT,
-                        settings=settings,
+                        settings=settings, day_pnl=core.marked_day_pnl(state),
                     )
                     print(f"[NIFTY50] {info}")
                     if result is not None and result.status in {"approved", "no_approved_entries"}:
