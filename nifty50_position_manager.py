@@ -65,6 +65,8 @@ def parse_management_batch(raw: str, expected_symbols: set[str]) -> dict:
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("position decision must be an object")
+        if set(row) != {"symbol", "action", "reason", "confidence", "new_stop", "new_target"}:
+            raise ValueError("position decision contains missing or unsupported fields")
         symbol = str(row.get("symbol", "")).strip().upper()
         if not symbol or symbol not in expected_symbols or symbol in seen:
             raise ValueError("position batch has unknown or duplicate symbol")
