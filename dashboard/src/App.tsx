@@ -336,6 +336,8 @@ function ResearchPage({runs}:{runs:BacktestRun[]}) {
   </>;
 }
 
+type NumericSettingKey = Exclude<keyof BotSettings, "square_off_time" | "emergency_stop" | "paper_only">;
+
 function SettingsPage() {
   const [settings, setSettings] = useState<BotSettings | null>(null);
   const [token, setToken] = useState("");
@@ -348,7 +350,7 @@ function SettingsPage() {
       .catch(e => { if (active) setError(e instanceof Error ? e.message : "Unable to load settings."); });
     return () => { active = false; };
   }, []);
-  const setNumber = (key: keyof BotSettings, value: string) => {
+  const setNumber = (key: NumericSettingKey, value: string) => {
     if (!settings) return;
     setSettings({ ...settings, [key]: Number(value) });
   };
@@ -379,7 +381,7 @@ function SettingsPage() {
   };
   if (!settings && !error) return <section className="panel"><p>Loading strategy settings…</p></section>;
   if (!settings) return <section className="panel"><div className="notice error-notice">{error}</div></section>;
-  const numeric = (label: string, key: keyof BotSettings, min: number, max: number, step: number, suffix = "") =>
+  const numeric = (label: string, key: NumericSettingKey, min: number, max: number, step: number, suffix = "") =>
     <label className="setting-field" key={String(key)}><span>{label}</span><div><input type="number" min={min} max={max} step={step} value={Number(settings[key])} onChange={e => setNumber(key, e.target.value)}/><small>{min}–{max}{suffix}</small></div></label>;
   return <>
     <section className="panel settings-panel">
@@ -412,7 +414,7 @@ function SettingsPage() {
     </section>
     <section className="panel settings-panel emergency-settings">
       <div><h3>Emergency stop</h3><p>When enabled, the bot halts new entries and attempts to close every open paper position using fresh Angel One quotes. It never sends broker orders.</p></div>
-      <label className="emergency-toggle"><input type="checkbox" checked={settings.emergency_stop} onChange={e => setSettings({...settings, emergency_stop:e.target.checked})}/><span>{settings.emergency_stop ? "STOP ACTIVE" : "Disabled"}</span></label>
+      <label className="emergency-toggle"><input type="checkbox" checked={settings.emergency_stop} onChange={e => { if (e.target.checked && !window.confirm("Emergency stop will halt new entries and attempt to close every open paper position at a fresh Angel One quote. Continue?")) return; setSettings({...settings, emergency_stop:e.target.checked}); }}/><span>{settings.emergency_stop ? "STOP ACTIVE" : "Disabled"}</span></label>
     </section>
     <section className="panel settings-panel">
       <div className="settings-readonly"><ShieldCheck size={17}/><div><strong>Paper-only execution is locked</strong><span>Live broker orders cannot be enabled from this dashboard.</span></div><b>ON</b></div>
