@@ -212,13 +212,13 @@ def _apply_management_decisions(state, approved, now):
             if price is not None:
                 core.close_position(state, symbol, price, "ai_exit", now, note=decision.reason)
             continue
+        proposed_stop = float(decision.new_stop) if action in {"MOVE_SL", "LOCK_PROFIT"} and decision.new_stop is not None else pos.stop
+        proposed_target = float(decision.new_target) if action == "UPDATE_TARGET" and decision.new_target is not None else pos.target
         changes = {}
-        if action in {"MOVE_SL", "LOCK_PROFIT"} and decision.new_stop is not None:
-            pos.stop = float(decision.new_stop)
-            changes["stop"] = round(pos.stop, 4)
-        if action == "UPDATE_TARGET" and decision.new_target is not None:
-            pos.target = float(decision.new_target)
-            changes["target"] = round(pos.target, 4)
+        if proposed_stop != pos.stop:
+            changes["stop"] = round(proposed_stop, 4)
+        if proposed_target != pos.target:
+            changes["target"] = round(proposed_target, 4)
         if changes:
             try:
                 rows = (core.SB.table("paper_trades").update(changes)
@@ -231,6 +231,9 @@ def _apply_management_decisions(state, approved, now):
                 notify.send("🛑 HALT: Could not persist AI position update; no new entries")
                 print(f"[HALT] position update persistence failed ({type(exc).__name__})")
                 continue
+            # Mutate memory only after the database confirms the durable level change.
+            pos.stop = proposed_stop
+            pos.target = proposed_target
             notify.send(
                 f"🧠 AI POSITION {action} {symbol} | confidence {decision.confidence:.0%} "
                 f"| SL {pos.stop:.2f} TP {pos.target:.2f} | {decision.reason}"
@@ -268,10 +271,8 @@ def _apply_deterministic_protection(state, now, settings):
         tighter = new_stop > pos.stop if pos.side == "BUY" else new_stop < pos.stop
         if not tighter:
             continue
-        pos.stop = new_stop
-        changed = True
         try:
-            rows = (core.SB.table("paper_trades").update({"stop": round(pos.stop, 4)})
+            rows = (core.SB.table("paper_trades").update({"stop": round(new_stop, 4)})
                     .eq("id", pos.row_id).eq("status", "open").select("id").execute().data or [])
             if not rows:
                 raise RuntimeError("stop update was not confirmed")
@@ -280,6 +281,8 @@ def _apply_deterministic_protection(state, now, settings):
             notify.send("🛑 HALT: Profit-protection stop could not be persisted")
             print(f"[HALT] deterministic stop persistence failed ({type(exc).__name__})")
             continue
+        pos.stop = new_stop
+        changed = True
         notify.send(f"🔒 {symbol} {trigger}: protective stop tightened to {pos.stop:.2f}")
         webhook.emit("risk.alert", now, {
             "symbol": symbol, "action": trigger, "stop": pos.stop,
