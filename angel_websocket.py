@@ -1,8 +1,8 @@
-"""Angel One SmartAPI WebSocket V2 feed and completed 5-minute candle builder.
+"""Angel One SmartAPI WebSocket V2 feed and completed intraday candle builder.
 
-This module is intentionally not wired into bot.py yet. Validate SNAP_QUOTE access,
-packet freshness and reconnect behaviour with the real account before switching the
-paper bot away from its current feed.
+Used by the opt-in Nifty 50 paper runner (ORB_RUNTIME_MODE=nifty50_batch).
+The runner has no broker-order path and fails closed on disconnected or stale quotes.
+Validate SNAP_QUOTE permissions and real-account reconnect behaviour before enabling it.
 """
 import os
 import threading
