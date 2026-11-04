@@ -72,6 +72,7 @@ function App() {
     source.addEventListener("trade.closed", onTradeEvent);
     source.addEventListener("bot.status_changed", onTradeEvent);
     source.addEventListener("risk.alert", onTradeEvent);
+    source.addEventListener("session.summary", onTradeEvent);
     source.addEventListener("resync", onResync);
     return () => source.close();
   }, [refresh, activeRange]);
