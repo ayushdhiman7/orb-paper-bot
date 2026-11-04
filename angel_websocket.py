@@ -52,6 +52,8 @@ class AngelWebSocketFeed:
         self._session_dates = {}
         self._forming = {}
         self._completed = {s: deque(maxlen=200) for s in self.symbols}
+        self._forming_1m = {}
+        self._completed_1m = {s: deque(maxlen=500) for s in self.symbols}
         self._lock = threading.RLock()
         self._thread = None
 
@@ -164,6 +166,23 @@ class AngelWebSocketFeed:
             self._last_day_volume.pop(symbol, None)
             self._forming.pop(symbol, None)
             self._completed[symbol].clear()
+            self._forming_1m.pop(symbol, None)
+            self._completed_1m[symbol].clear()
+
+        # Maintain completed 1-minute candles for AI position reviews.
+        minute_bucket = event_time.replace(second=0, microsecond=0)
+        current_1m = self._forming_1m.get(symbol)
+        if current_1m and minute_bucket > current_1m["timestamp"]:
+            self._completed_1m[symbol].append(current_1m.copy())
+            current_1m = None
+        if current_1m is None:
+            current_1m = {"timestamp": minute_bucket, "open": quote["price"],
+                          "high": quote["price"], "low": quote["price"],
+                          "close": quote["price"], "volume": 0.0}
+            self._forming_1m[symbol] = current_1m
+        current_1m["high"] = max(current_1m["high"], quote["price"])
+        current_1m["low"] = min(current_1m["low"], quote["price"])
+        current_1m["close"] = quote["price"]
 
         minute = event_time.hour * 60 + event_time.minute
         bucket_minute = minute - (minute % 5)
@@ -227,6 +246,11 @@ class AngelWebSocketFeed:
         """Fresh LTP in rupees, or None when disconnected/stale."""
         evidence = self.quote(symbol, now)
         return evidence["price"] if evidence is not None else None
+
+    def candles_1m(self, symbol):
+        """Completed current-session 1-minute OHLC candles for AI position reviews."""
+        with self._lock:
+            return [row.copy() for row in self._completed_1m.get(base_name(symbol), ())]
 
     def candles(self, symbol):
         """Completed current-session 5m OHLCV candles; excludes the forming candle."""
