@@ -119,3 +119,29 @@ def test_quotes_require_connected_socket_and_fresh_exchange_timestamp():
     stale["last_traded_timestamp"] = int(old * 1000)
     feed._on_data(None, stale)
     assert feed.last("RELIANCE.NS") is None
+
+
+def test_restarts_websocket_only_after_sdk_thread_exits_and_backoff_elapses(monkeypatch):
+    clock = [1000.0]
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0])
+
+    class ThreadState:
+        def __init__(self, alive):
+            self.alive = alive
+        def is_alive(self):
+            return self.alive
+
+    calls = []
+    monkeypatch.setattr(feed, "start", lambda: calls.append("start") or True)
+    feed._thread = ThreadState(False)
+    feed._last_start_attempt = 980.0
+    assert feed.restart_if_stopped(retry_interval=30) is False
+    assert calls == []
+
+    clock[0] = 1011.0
+    assert feed.restart_if_stopped(retry_interval=30) is True
+    assert calls == ["start"]
+
+    feed.connected = True
+    assert feed.restart_if_stopped(retry_interval=30) is False
+    assert calls == ["start"]
