@@ -303,8 +303,6 @@ def run():
     last_position_review = None
     last_settings_refresh = time.monotonic()
     session_date = datetime.now(IST).date()
-    emergency_notified = False
-    last_protection_review = None
     print(f"[NIFTY50] connected; {len(universe)} constituents; paper-only")
     try:
         while True:
@@ -331,7 +329,6 @@ def run():
                 last_settings_refresh = time.monotonic()
             if settings.get("emergency_stop"):
                 _emergency_stop(state, now)
-                emergency_notified = True
             if now.weekday() >= 5 or clock < core.MARKET_OPEN or clock > core.MARKET_CLOSE:
                 if clock > core.MARKET_CLOSE and state.positions:
                     for symbol in list(state.positions):
