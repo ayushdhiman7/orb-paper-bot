@@ -15,12 +15,12 @@ This prevents the five-minute updater from changing the checkout during recovery
 
 ```bash
 systemctl status orb-bot.service --no-pager
-pgrep -af 'python.*bot.py' || true
+pgrep -af 'python.*(bot.py|nifty50_runner.py)' || true
 ```
 
 If the bot is active, do not kill it as a routine rollback step. Wait until its session has completed, or follow the project's manual paper-position reconciliation procedure first. Confirm there are no unresolved open paper trades in Supabase before starting an older version.
 
-## 3. Record the current deployment and identify the known-good commit
+Before switching between the legacy bot.py service and the Nifty 50 runner, follow docs/NIFTY50_EC2_MIGRATION.md. Never switch while a paper position is open or while the market session is active. The Nifty 50 runner is paper-only and must use the matching deploy/orb-bot.service from the deployed commit.\n\n## 3. Record the current deployment and identify the known-good commit
 
 ```bash
 cd ~/orb-paper-bot
