@@ -277,3 +277,91 @@ button,select,input,a{touch-action:manipulation}
 .feature-toggle strong{font-size:11px}
 .feature-toggle small{color:var(--muted);font-size:10px;line-height:1.5}
 .feature-toggle input{width:18px;height:18px;flex:0 0 auto;accent-color:var(--accent)}
+
+
+/* ---------- UI refinement: mobile trade cards and navigation ---------- */
+.trade-card {
+  gap: 11px;
+  padding: 14px;
+  border-color: #2c3140;
+  background: linear-gradient(145deg, #171b26 0%, #11151e 100%);
+  box-shadow: 0 8px 22px #00000020;
+}
+.trade-card-top { gap: 9px; }
+.trade-card-top .symbol-icon {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #343047;
+  background: #242039;
+  color: #c9bbff;
+  font-size: 10px;
+}
+.trade-card-id strong { font-size: 13px; letter-spacing: -.01em; }
+.trade-card-id small { font-size: 10px; }
+.trade-card-pnl { font-size: 14px; font-weight: 750; letter-spacing: -.02em; }
+.trade-card-mid {
+  padding: 9px 10px;
+  border: 1px solid #292e3b;
+  border-radius: 8px;
+  background: #0d1119;
+  font-size: 11px;
+}
+.trade-card-mid .price-pair { font-weight: 700; }
+.trade-card-tags { align-items: center; gap: 7px; }
+.trade-card-tags .ai-tag,
+.trade-card-tags .mark-tag,
+.trade-card-tags .est-tag { min-height: 24px; display: inline-flex; align-items: center; }
+.trade-card-tags .mark-tag {
+  color: #c7bbff;
+  border-color: #443a68;
+  background: #211c35;
+}
+.trade-card-tags .manual-exit-button {
+  min-height: 34px;
+  margin: 0 0 0 auto;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 10px;
+  letter-spacing: .01em;
+}
+.trade-card-tags .manual-exit-status { flex-basis: 100%; }
+.bottom-nav-item { transition: color .16s ease, background .16s ease; }
+.bottom-nav-item:active { transform: scale(.97); }
+@media (max-width: 700px) {
+  .content-wrap {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .page-heading { margin-bottom: 20px; }
+  .page-heading h1 { line-height: 1.12; }
+  .heading-actions { gap: 8px; }
+  .heading-actions > button { min-width: 0; padding-inline: 9px; }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-card { min-height: 112px; }
+  .metric-value { letter-spacing: -.045em; }
+  .section-row { align-items: flex-start; gap: 10px; }
+  .section-row > div:first-child { min-width: 0; }
+  .range-switch { flex-shrink: 0; }
+  .trade-card + .trade-card { margin-top: 10px; }
+  .table-panel { overflow: hidden; }
+  .panel-heading h3 { font-size: 12px; }
+  .bottom-nav {
+    min-height: calc(62px + env(safe-area-inset-bottom));
+    padding-top: 7px;
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
+  }
+  .bottom-nav-item { min-height: 48px; font-size: 10px; }
+}
+@media (max-width: 380px) {
+  .trade-card { padding: 11px; }
+  .trade-card-top { gap: 7px; }
+  .trade-card-top .symbol-icon { width: 30px; height: 30px; }
+  .trade-card-pnl { font-size: 12px; }
+  .trade-card-mid { padding: 8px; font-size: 10px; }
+  .trade-card-tags .manual-exit-button { padding-inline: 9px; }
+  .page-heading h1 { font-size: 23px; }
+  .market-pill { padding: 6px 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottom-nav-item { transition: none; }
+}
