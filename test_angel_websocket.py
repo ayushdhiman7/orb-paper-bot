@@ -162,3 +162,24 @@ def test_dead_websocket_thread_invalidates_connected_flag_during_backoff():
 
     assert feed.restart_if_stopped(retry_interval=30) is False
     assert feed.connected is False
+
+
+
+def test_websocket_open_is_not_ready_until_first_valid_quote():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+
+    class FakeSocket:
+        def subscribe(self, *_args):
+            return None
+
+    feed.socket = FakeSocket()
+    feed._on_open(None)
+
+    assert feed.connected is False
+    assert feed.last("RELIANCE.NS") is None
+
+    feed._on_data(None, packet())
+
+    assert feed.connected is True
+    assert feed.last("RELIANCE.NS") == 2500.0
