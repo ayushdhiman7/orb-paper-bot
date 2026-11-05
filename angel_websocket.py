@@ -126,7 +126,9 @@ class AngelWebSocketFeed:
     def _on_open(self, _wsapp):
         token_list = [{"exchangeType": NSE_CM, "tokens": list(self.token_to_symbol)}]
         self.socket.subscribe(CORRELATION_ID, SNAP_QUOTE_MODE, token_list)
-        self.connected = True
+        # A successful WebSocket handshake does not prove SNAP_QUOTE is flowing.
+        # Readiness is established only by the first valid market-data packet.
+        self.connected = False
         self.last_error = None
 
     def _on_error(self, _wsapp, error):
@@ -167,6 +169,9 @@ class AngelWebSocketFeed:
             with self._lock:
                 self.latest[symbol] = quote
                 self._update_candle(symbol, quote)
+                # The first valid packet confirms that the subscription is delivering data.
+                self.connected = True
+                self.last_error = None
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             self.last_error = f"invalid WebSocket packet: {type(exc).__name__}"
 
