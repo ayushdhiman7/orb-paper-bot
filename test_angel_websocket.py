@@ -110,8 +110,8 @@ def test_quotes_require_connected_socket_and_fresh_exchange_timestamp():
     clock = [now]
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0], max_stale_seconds=45)
     feed._on_data(None, packet())
-    assert feed.last("RELIANCE.NS") is None
-    feed.connected = True
+    # The first valid SNAP_QUOTE packet establishes feed readiness.
+    assert feed.connected is True
     assert feed.last("RELIANCE.NS") == 2500.0
     stale = packet()
     old = datetime(2026, 10, 30, 9, 10, 0, tzinfo=IST).timestamp()
