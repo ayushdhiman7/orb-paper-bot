@@ -118,6 +118,6 @@ The final comparison must run the same market data and cost model across the det
 - [x] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead (operator-confirmed).
 - [x] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions (operator-confirmed).
 
-## Operator-owned steps / explicit exclusions
+## EC2 service configuration\n\nThe checked-in deploy/orb-bot.service template is the Nifty 50 runner service definition. It explicitly sets ORB_RUNTIME_MODE=nifty50_batch, uses nifty50_runner.py, and does not auto-restart the process. Use the staged migration and rollback procedure in NIFTY50_EC2_MIGRATION.md; do not run the full installer as a shortcut because it also installs dependencies and enables multiple timers.\n\n## Operator-owned steps / explicit exclusions
 
 The actual-account SNAP_QUOTE test and EC2 service/deployment changes require the operator's authenticated account and approval. Supabase migration execution is complete for connected project gbqmvnekxsckzjzcorac; a different/fresh environment still needs the listed migrations. Do not run the dashboard deployment workflow or merge this PR to main as part of this runbook; a push to main can deploy the dashboard to EC2. The EC2 deployment remains user-managed and untouched.
