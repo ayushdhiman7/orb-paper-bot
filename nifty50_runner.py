@@ -209,10 +209,22 @@ def _apply_plans(state, result, now):
         state.day_pnl -= plan.entry_fee
         state.last_prices[plan.symbol] = plan.market_price
         state.done_symbols.add(plan.symbol)
+        technical = plan.technical_evidence or {}
+        sentiment = plan.sentiment_evidence or {}
         notify.send(
-            f"🤖 NIFTY50 PAPER ENTRY {plan.side} {plan.quantity} {plan.symbol} "
-            f"@ {plan.entry_fill:.2f} | SL {plan.stop:.2f} TP {plan.target:.2f} "
-            f"| AI {plan.confidence:.0%} rank #{plan.rank} | Risk verdict: APPROVED | {plan.reason}"
+            f"🤖 NIFTY50 PAPER ENTRY · Trade ID: {position.row_id}\\n"
+            f"Recommendation: TAKE · AI confidence: {plan.confidence:.0%} · Rank: #{plan.rank}\\n"
+            f"{plan.side} {plan.quantity} {plan.symbol} @ ₹{plan.entry_fill:.2f} "
+            f"· SL ₹{plan.stop:.2f} · TP ₹{plan.target:.2f}\\n"
+            f"Risk verdict: APPROVED · {plan.reason}\\n"
+            f"Technical: trend={technical.get('trend', 'n/a')}, "
+            f"EMA20={technical.get('ema20', 'n/a')}, VWAP={technical.get('vwap', 'n/a')}, "
+            f"ATR14={technical.get('atr14', 'n/a')}, extension_ATR={technical.get('extension_atr', 'n/a')}\\n"
+            f"Sentiment (context only): news={sentiment.get('news_score', 'n/a')} "
+            f"[{sentiment.get('news_status', 'unavailable')}], "
+            f"social={sentiment.get('social_score', 'n/a')} "
+            f"[{sentiment.get('social_status', 'unavailable')}], "
+            f"combined={sentiment.get('combined_score', 'n/a')}"
         )
         webhook.emit("trade.opened", now, {
             "trade_id": position.row_id, "symbol": plan.symbol, "side": plan.side,
