@@ -10,7 +10,7 @@ def _universe():
 class Feed:
     def __init__(self, connected=True):
         self.connected = connected
-    def quote(self, symbol, now):
+    def quote(self, symbol, now=None):
         return {"symbol": symbol}
 
 
