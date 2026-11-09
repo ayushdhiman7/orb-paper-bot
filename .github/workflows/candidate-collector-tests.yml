@@ -2,7 +2,8 @@ name: candidate-collector-tests
 
 on:
   push:
-    branches: ["phase2/**", "phase3/**", "phase3-*"]
+    branches: ["main", "phase2/**", "phase3/**", "phase3-*"]
+  workflow_dispatch:
   pull_request:
     branches: ["main"]
 
