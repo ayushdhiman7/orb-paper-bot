@@ -74,6 +74,71 @@ def _emergency_stop(state, now):
     return not unresolved and not state.positions
 
 
+def _enforce_daily_loss_cap(state, now):
+    """Liquidate every paper position after the configured marked daily loss cap is reached.
+
+    Marks are refreshed from the runtime's fresh-quote-only price source before
+    evaluating the cap. If any position cannot be marked, the runner stays
+    halted and retries on the next loop; stale prices are never used to claim
+    that the portfolio is flat or to fabricate an exit.
+    """
+    if not state.positions:
+        return True
+
+    fresh_prices = {}
+    missing = []
+    for symbol in list(state.positions):
+        price = core.last_price(symbol)
+        if price is None:
+            missing.append(symbol)
+        else:
+            fresh_prices[symbol] = price
+
+    if missing:
+        state.halted = True
+        notify.send(
+            "🛑 DAILY RISK HALT: cannot verify daily loss because fresh quotes are "
+            f"missing for {', '.join(missing)}. Positions remain open pending fresh quotes.",
+            once_key="nifty50-daily-cap-unmarked",
+        )
+        return False
+
+    state.last_prices.update(fresh_prices)
+    loss_limit = float(core.CAPITAL) * float(core.DAILY_LOSS_CAP_PCT) / 100.0
+    marked_pnl = core.marked_day_pnl(state)
+    if marked_pnl > -loss_limit:
+        return False
+
+    state.halted = True
+    unresolved = []
+    for symbol, price in fresh_prices.items():
+        if symbol not in state.positions:
+            continue
+        try:
+            closed = core.close_position(state, symbol, price, "daily_loss_cap", now)
+        except Exception as exc:
+            print(f"[HALT] daily-loss liquidation failed for {symbol} ({type(exc).__name__})")
+            closed = False
+        if not closed or symbol in state.positions:
+            unresolved.append(symbol)
+
+    if unresolved or state.positions:
+        remaining = sorted(set(unresolved) | set(state.positions))
+        notify.send(
+            "🛑 DAILY LOSS CAP HIT: entries locked; liquidation is incomplete for "
+            f"{', '.join(remaining)}. Fresh-quote close will be retried.",
+            once_key="nifty50-daily-cap-liquidation-pending",
+        )
+        return False
+
+    notify.send(
+        f"🛑 DAILY LOSS CAP HIT ({marked_pnl:+.2f}, limit -{loss_limit:.2f}). "
+        "All paper positions closed and new entries locked for this session.",
+        once_key="nifty50-daily-cap-liquidated",
+    )
+    return True
+
+
 def _persist_ai_plan(plan, now):
     result = core.SB.table("paper_trades").insert({
         "ts": now.isoformat(),
@@ -440,6 +505,7 @@ def run():
                 protection_event = _apply_deterministic_protection(state, now, settings)
                 core.manage_positions(state, now)
                 core.check_daily_cap(state)
+                _enforce_daily_loss_cap(state, now)
                 review_due = bool(settings.get("ai_position_management_enabled", True)) and bool(state.positions) and (protection_event or
                     last_position_review is None or
                     (now - last_position_review).total_seconds() >= int(settings["position_review_seconds"])
