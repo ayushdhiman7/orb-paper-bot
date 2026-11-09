@@ -46,6 +46,7 @@ class AngelWebSocketFeed:
         self.max_stale_seconds = max_stale_seconds
         self.socket = None
         self.connected = False
+        self.socket_open = False
         self.last_error = None
         self.latest = {}
         self._last_day_volume = {}
@@ -109,14 +110,18 @@ class AngelWebSocketFeed:
     def _on_open(self, _wsapp):
         token_list = [{"exchangeType": NSE_CM, "tokens": list(self.token_to_symbol)}]
         self.socket.subscribe(CORRELATION_ID, SNAP_QUOTE_MODE, token_list)
-        self.connected = True
+        # Track transport separately; readiness requires an actual valid quote.
+        self.socket_open = True
+        self.connected = False
         self.last_error = None
 
     def _on_error(self, _wsapp, error):
+        self.socket_open = False
         self.connected = False
         self.last_error = f"WebSocket error: {type(error).__name__}: {str(error)[:100]}"
 
     def _on_close(self, _wsapp):
+        self.socket_open = False
         self.connected = False
 
     @staticmethod
@@ -150,6 +155,9 @@ class AngelWebSocketFeed:
             with self._lock:
                 self.latest[symbol] = quote
                 self._update_candle(symbol, quote)
+                # A valid packet proves feed readiness only on an open socket.
+                self.connected = self.socket_open
+                self.last_error = None
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             self.last_error = f"invalid WebSocket packet: {type(exc).__name__}"
 

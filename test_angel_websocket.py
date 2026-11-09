@@ -40,6 +40,7 @@ def test_subscribes_all_configured_symbols_once_in_snap_quote_mode():
 def test_converts_paise_to_rupees_and_rejects_unknown_tokens():
     clock = [datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()]
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0])
+    feed.socket_open = True
     feed.connected = True
     feed._on_data(None, packet(price=2512))
     feed._on_data(None, packet(token="99999", price=999))
@@ -49,6 +50,7 @@ def test_converts_paise_to_rupees_and_rejects_unknown_tokens():
 def test_stale_quotes_are_not_returned():
     clock = [datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()]
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0], max_stale_seconds=45)
+    feed.socket_open = True
     feed.connected = True
     feed._on_data(None, packet())
     clock[0] += 46
@@ -111,6 +113,7 @@ def test_quotes_require_connected_socket_and_fresh_exchange_timestamp():
     feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: clock[0], max_stale_seconds=45)
     feed._on_data(None, packet())
     assert feed.last("RELIANCE.NS") is None
+    feed.socket_open = True
     feed.connected = True
     assert feed.last("RELIANCE.NS") == 2500.0
     stale = packet()
@@ -119,3 +122,22 @@ def test_quotes_require_connected_socket_and_fresh_exchange_timestamp():
     stale["last_traded_timestamp"] = int(old * 1000)
     feed._on_data(None, stale)
     assert feed.last("RELIANCE.NS") is None
+
+
+def test_websocket_open_is_not_ready_until_first_valid_quote():
+    class FakeSocket:
+        def subscribe(self, *_args):
+            return None
+
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(
+        ["RELIANCE.NS"], clock=lambda: now, websocket_factory=lambda *_a, **_k: FakeSocket()
+    )
+    feed.socket = FakeSocket()
+    feed._on_open(None)
+    assert feed.connected is False
+    assert feed.last("RELIANCE.NS") is None
+
+    feed._on_data(None, packet())
+    assert feed.connected is True
+    assert feed.last("RELIANCE.NS") == 2500.0
