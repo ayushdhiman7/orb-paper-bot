@@ -83,6 +83,7 @@ def _enforce_daily_loss_cap(state, now, cap_triggered=False):
     that the portfolio is flat or to fabricate an exit.
     """
     if not state.positions:
+        state.risk_mark_blocked = False
         return True
 
     fresh_prices = {}
@@ -98,14 +99,17 @@ def _enforce_daily_loss_cap(state, now, cap_triggered=False):
         getattr(state, "daily_loss_cap_triggered", False) or cap_triggered
     )
     if missing and not state.daily_loss_cap_triggered:
-        state.halted = True
+        # Missing marks block entries, but are not a permanent strategy/persistence
+        # halt. Recover automatically once every open position has a fresh quote.
+        state.risk_mark_blocked = True
         notify.send(
-            "🛑 DAILY RISK HALT: cannot verify daily loss because fresh quotes are "
+            "🛑 DAILY RISK BLOCK: cannot verify daily loss because fresh quotes are "
             f"missing for {', '.join(missing)}. Positions remain open pending fresh quotes.",
             once_key="nifty50-daily-cap-unmarked",
         )
         return False
 
+    state.risk_mark_blocked = False
     # Once the cap has been breached on a complete, fresh mark, latch that event.
     # On partial feed loss, close every position that still has a fresh executable
     # paper mark and retry only the unresolved symbols; never use stale prices.
@@ -546,7 +550,7 @@ def run():
                         notify.send("🧠 NIFTY50 POSITION REVIEW\n" + "\n".join(lines)[:3200])
                     _apply_management_decisions(state, approved, now)
                 due = last_scan is None or (now - last_scan).total_seconds() >= int(settings["scan_interval_seconds"])
-                if due and clock < core.NO_NEW_TRADES_AFTER and not state.halted:
+                if due and clock < core.NO_NEW_TRADES_AFTER and not state.halted and not getattr(state, "risk_mark_blocked", False):
                     last_scan = now
                     result, info = scan_batch(
                         universe, feed, now, state, review_batch=llm_gate.review_batch,
