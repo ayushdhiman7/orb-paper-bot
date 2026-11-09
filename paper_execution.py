@@ -25,6 +25,8 @@ class PaperExecutionPlan:
     confidence: float
     reason: str
     rank: int
+    technical_evidence: dict | None = None
+    sentiment_evidence: dict | None = None
 
 
 def _number(value, name, *, positive=False):
@@ -119,4 +121,6 @@ def recompute_paper_execution(
         market_price=price, entry_fill=entry_fill, stop=stop, target=target,
         entry_fee=entry_fee, risk_amount=quantity * per_share_risk,
         confidence=entry.confidence, reason=entry.reason, rank=entry.rank,
+        technical_evidence=dict(candidate.indicators) if candidate.indicators is not None else None,
+        sentiment_evidence=dict(candidate.sentiment) if candidate.sentiment is not None else None,
     )
