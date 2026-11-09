@@ -79,3 +79,29 @@ def test_daily_loss_cap_does_not_liquidate_below_threshold(monkeypatch):
     assert state.halted is False
     assert set(state.positions) == {"RELIANCE"}
     assert closed == []
+
+
+def test_daily_loss_cap_closes_fresh_positions_while_retrying_missing_symbol(monkeypatch):
+    state = _state(["RELIANCE", "TCS"], -25.0)
+    state.daily_loss_cap_triggered = True
+    closed = []
+    monkeypatch.setattr(runner.core, "CAPITAL", 1000.0)
+    monkeypatch.setattr(runner.core, "DAILY_LOSS_CAP_PCT", 2.0)
+    monkeypatch.setattr(
+        runner.core, "last_price",
+        lambda symbol: 100.0 if symbol == "RELIANCE" else None,
+    )
+    monkeypatch.setattr(runner.core, "marked_day_pnl", lambda current: current.day_pnl)
+
+    def close_position(current, symbol, price, reason, now):
+        closed.append((symbol, price, reason))
+        current.positions.pop(symbol)
+        return True
+
+    monkeypatch.setattr(runner.core, "close_position", close_position)
+    monkeypatch.setattr(runner.notify, "send", lambda *args, **kwargs: None)
+
+    assert runner._enforce_daily_loss_cap(state, None, cap_triggered=True) is False
+    assert state.halted is True
+    assert closed == [("RELIANCE", 100.0, "daily_loss_cap")]
+    assert set(state.positions) == {"TCS"}
