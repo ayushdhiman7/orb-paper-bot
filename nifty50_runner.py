@@ -74,7 +74,7 @@ def _emergency_stop(state, now):
     return not unresolved and not state.positions
 
 
-def _enforce_daily_loss_cap(state, now):
+def _enforce_daily_loss_cap(state, now, cap_triggered=False):
     """Liquidate every paper position after the configured marked daily loss cap is reached.
 
     Marks are refreshed from the runtime's fresh-quote-only price source before
@@ -94,7 +94,10 @@ def _enforce_daily_loss_cap(state, now):
         else:
             fresh_prices[symbol] = price
 
-    if missing:
+    state.daily_loss_cap_triggered = bool(
+        getattr(state, "daily_loss_cap_triggered", False) or cap_triggered
+    )
+    if missing and not state.daily_loss_cap_triggered:
         state.halted = True
         notify.send(
             "🛑 DAILY RISK HALT: cannot verify daily loss because fresh quotes are "
@@ -103,14 +106,18 @@ def _enforce_daily_loss_cap(state, now):
         )
         return False
 
+    # Once the cap has been breached on a complete, fresh mark, latch that event.
+    # On partial feed loss, close every position that still has a fresh executable
+    # paper mark and retry only the unresolved symbols; never use stale prices.
     state.last_prices.update(fresh_prices)
     loss_limit = float(core.CAPITAL) * float(core.DAILY_LOSS_CAP_PCT) / 100.0
     marked_pnl = core.marked_day_pnl(state)
-    if marked_pnl > -loss_limit:
+    if not state.daily_loss_cap_triggered and marked_pnl > -loss_limit:
         return False
 
+    state.daily_loss_cap_triggered = True
     state.halted = True
-    unresolved = []
+    unresolved = list(missing)
     for symbol, price in fresh_prices.items():
         if symbol not in state.positions:
             continue
@@ -516,8 +523,8 @@ def run():
             elif clock >= core.RANGE_END:
                 protection_event = _apply_deterministic_protection(state, now, settings)
                 core.manage_positions(state, now)
-                core.check_daily_cap(state)
-                _enforce_daily_loss_cap(state, now)
+                cap_triggered = core.check_daily_cap(state)
+                _enforce_daily_loss_cap(state, now, cap_triggered)
                 review_due = bool(settings.get("ai_position_management_enabled", True)) and bool(state.positions) and (protection_event or
                     last_position_review is None or
                     (now - last_position_review).total_seconds() >= int(settings["position_review_seconds"])
