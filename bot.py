@@ -92,6 +92,7 @@ class State:
     positions: dict = field(default_factory=dict)
     done_symbols: set = field(default_factory=set)
     halted: bool = False
+    daily_loss_cap_triggered: bool = False
     last_prices: dict = field(default_factory=dict)
     control_trades_today: int = 0  # independent no-AI control's daily entry limit
     control_cash: float = CAPITAL  # virtual cash reserved/settled independently of real paper trades
@@ -559,17 +560,21 @@ def check_daily_cap(state: State):
     # Fail closed when an open position cannot be marked. Ignoring a missing quote
     # could make the daily loss cap appear safer than it really is.
     unmarked = [symbol for symbol in state.positions if state.last_prices.get(symbol) is None]
-    if unmarked and not state.halted:
-        state.halted = True
-        print(f"[HALT] Missing mark price for open position(s): {', '.join(unmarked)}. No new trades today.")
-        notify.send(f"HALT: no price for open position(s) {', '.join(unmarked)}. No new trades today.", once_key="halt-mark")
-        return
+    if unmarked:
+        if not state.halted:
+            state.halted = True
+            print(f"[HALT] Missing mark price for open position(s): {', '.join(unmarked)}. No new trades today.")
+            notify.send(f"HALT: no price for open position(s) {', '.join(unmarked)}. No new trades today.", once_key="halt-mark")
+        return state.daily_loss_cap_triggered
 
     marked_pnl = marked_day_pnl(state)
-    if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100 and not state.halted:
-        state.halted = True
-        print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
-        notify.send(f"HALT: daily loss cap hit (P&L {marked_pnl:+.2f}). No new trades today.", once_key="halt-cap")
+    if marked_pnl <= -CAPITAL * DAILY_LOSS_CAP_PCT / 100:
+        state.daily_loss_cap_triggered = True
+        if not state.halted:
+            state.halted = True
+            print(f"[HALT] Daily loss cap hit (marked P&L {marked_pnl:.2f}). No new trades today.")
+            notify.send(f"HALT: daily loss cap hit (P&L {marked_pnl:+.2f}). No new trades today.", once_key="halt-cap")
+    return state.daily_loss_cap_triggered
 
 
 def _row_day(row):
