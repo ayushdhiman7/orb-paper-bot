@@ -34,6 +34,7 @@ For a different environment or a fresh project, apply these migrations in timest
 3. supabase/migrations/202611040002_orb_bot_settings.sql
 4. supabase/migrations/202611040003_initial_stop.sql
 5. supabase/migrations/202611040004_bot_session_reports.sql
+6. supabase/migrations/202611090001_restrict_direct_table_access.sql (review and apply separately; not yet applied to the connected project)
 
 The initial-stop migration is idempotent. It backfills legacy rows from their current stop as the safest available baseline; new Nifty 50 entries persist the true original stop. Verify that paper_trades.initial_stop, paper_trades.stop, paper_trades.target, paper_trades.ai_confidence, paper_trades.ai_rank, manual_exit_requests, and orb_bot_settings exist before starting the runner.
 
@@ -102,11 +103,11 @@ The final comparison must run the same market data and cost model across the det
 
 ## Acceptance checklist before calling Phase 3 operational
 
-- [x] CI is green on the exact PR head commit (verified for commit 1cb3e2bb5a02d3670b9925c37c2c58f451d5cde5).
+- [x] CI is green on the current main commit after PR #33 and PR #34 merges (2026-11-09).
 - [x] Supabase migrations have been applied and schema/settings verified on connected project gbqmvnekxsckzjzcorac; repeat only for a different/fresh environment.
-- [x] Actual account SNAP_QUOTE login, subscription, and fresh quote receipt are confirmed (operator-confirmed).
-- [x] A full market session confirms current 50-symbol universe/token mapping and quote freshness behavior (operator-confirmed).
-- [x] Disconnect/reconnect test confirms stale data is rejected and no fallback feed is used (operator-confirmed).
+- [ ] Actual account SNAP_QUOTE login, subscription, and fresh quote receipt are confirmed. Previous SmartAPI historical-candle requests were rate-limited; this does not establish SNAP_QUOTE entitlement.
+- [ ] A full market session confirms current 50-symbol universe/token mapping and quote freshness behavior.
+- [ ] Disconnect/reconnect test confirms stale data is rejected and no fallback feed is used.
 - [ ] Paper entry writes the trade row before in-memory portfolio state changes.
 - [ ] Restart restores open position, original stop, current stop, target, AI confidence, and rank.
 - [ ] +1R, +1.5R, and +2R protection behavior is checked for long and short paper positions, including fees and restart.
@@ -115,9 +116,9 @@ The final comparison must run the same market data and cost model across the det
 - [ ] Dashboard settings save with version checks; invalid cross-field R thresholds are rejected.
 - [ ] Manual exit only closes a paper position at a fresh Angel One quote.
 - [ ] Telegram notifications cover entry, exit, risk rejection, position review, reconnect, emergency stop, persistence halt, and the durable daily paper report.
-- [x] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead (operator-confirmed).
-- [x] At least several separate paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions (operator-confirmed).
+- [ ] Point-in-time historical Nifty 50 backtest is completed with chronological train/test splits, realistic costs, and no constituent/news look-ahead. The previously reviewed legacy backtest was rejected and is not Phase 9 sign-off.
+- [ ] At least several separate Nifty 50 paper sessions are reviewed for ledger consistency, fees, slippage, and no duplicate positions.
 
 ## EC2 service configuration\n\nThe checked-in deploy/orb-bot.service template is the Nifty 50 runner service definition. It explicitly sets ORB_RUNTIME_MODE=nifty50_batch, uses nifty50_runner.py, and does not auto-restart the process. Use the staged migration and rollback procedure in NIFTY50_EC2_MIGRATION.md; do not run the full installer as a shortcut because it also installs dependencies and enables multiple timers.\n\n## Operator-owned steps / explicit exclusions
 
-The actual-account SNAP_QUOTE test and EC2 service/deployment changes require the operator's authenticated account and approval. Supabase migration execution is complete for connected project gbqmvnekxsckzjzcorac; a different/fresh environment still needs the listed migrations. Do not run the dashboard deployment workflow or merge this PR to main as part of this runbook; a push to main can deploy the dashboard to EC2. The EC2 deployment remains user-managed and untouched.
+The actual-account SNAP_QUOTE test and EC2 service/deployment changes require the operator's authenticated account and approval. The five Phase 3 schema migrations listed above were applied to connected project gbqmvnekxsckzjzcorac on 2026-11-04. The additional direct-client-access hardening migration (202611090001) is merged to the repository but has NOT been applied to the connected project. Review its dashboard/API impact before applying. The EC2 bot service remains user-managed and untouched.
