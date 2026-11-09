@@ -16,8 +16,23 @@ from nifty_universe import fetch_nifty50_universe, write_universe_cache
 from phase3_runtime import run_batch_cycle
 
 
+def fresh_quote_coverage(universe, feed):
+    """Return the symbols with a currently fresh SNAP_QUOTE packet."""
+    missing = []
+    for row in universe:
+        try:
+            quote = feed.quote(row["symbol"])
+        except Exception:
+            quote = None
+        if quote is None:
+            missing.append(row["symbol"])
+    return len(universe) - len(missing), missing
+
+
 def start_feed():
     universe = fetch_nifty50_universe()
+    if not isinstance(universe, list) or len(universe) != 50:
+        raise RuntimeError("Nifty 50 universe must contain exactly 50 instruments")
     write_universe_cache(
         universe,
         os.getenv("NIFTY50_UNIVERSE_CACHE", "/tmp/orb-nifty50-universe.json"),
@@ -29,11 +44,16 @@ def start_feed():
     )
     feed.start()
     deadline = time.monotonic() + int(os.getenv("ANGEL_WS_CONNECT_TIMEOUT", "20"))
-    while not feed.connected and time.monotonic() < deadline:
+    covered, missing = fresh_quote_coverage(universe, feed)
+    while covered != 50 and time.monotonic() < deadline:
         time.sleep(0.2)
-    if not feed.connected:
+        covered, missing = fresh_quote_coverage(universe, feed)
+    if covered != 50:
         feed.stop()
-        raise RuntimeError("Angel One WebSocket connection failed; refusing data fallback")
+        raise RuntimeError(
+            f"Angel One SNAP_QUOTE coverage incomplete ({covered}/50 fresh); "
+            f"missing: {', '.join(missing[:10])}. Refusing partial-universe operation and data fallback."
+        )
     return universe, feed
 
 
@@ -43,6 +63,14 @@ def scan_batch(universe, feed, now, state, *, review_batch, capital, risk_pct,
         raise RuntimeError("Nifty 50 universe must contain exactly 50 instruments")
     if not getattr(feed, "connected", False):
         return None, {"status": "feed_disconnected"}
+    covered, missing = fresh_quote_coverage(universe, feed)
+    if covered != 50:
+        return None, {
+            "status": "incomplete_feed_coverage",
+            "fresh_symbols": covered,
+            "required_symbols": 50,
+            "missing_symbols": missing,
+        }
     settings = settings or {}
     limits = PortfolioLimits(
         capital=capital,

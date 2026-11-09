@@ -74,6 +74,78 @@ def _emergency_stop(state, now):
     return not unresolved and not state.positions
 
 
+def _enforce_daily_loss_cap(state, now, cap_triggered=False):
+    """Liquidate every paper position after the configured marked daily loss cap is reached.
+
+    Marks are refreshed from the runtime's fresh-quote-only price source before
+    evaluating the cap. If any position cannot be marked, the runner stays
+    halted and retries on the next loop; stale prices are never used to claim
+    that the portfolio is flat or to fabricate an exit.
+    """
+    if not state.positions:
+        return True
+
+    fresh_prices = {}
+    missing = []
+    for symbol in list(state.positions):
+        price = core.last_price(symbol)
+        if price is None:
+            missing.append(symbol)
+        else:
+            fresh_prices[symbol] = price
+
+    state.daily_loss_cap_triggered = bool(
+        getattr(state, "daily_loss_cap_triggered", False) or cap_triggered
+    )
+    if missing and not state.daily_loss_cap_triggered:
+        state.halted = True
+        notify.send(
+            "🛑 DAILY RISK HALT: cannot verify daily loss because fresh quotes are "
+            f"missing for {', '.join(missing)}. Positions remain open pending fresh quotes.",
+            once_key="nifty50-daily-cap-unmarked",
+        )
+        return False
+
+    # Once the cap has been breached on a complete, fresh mark, latch that event.
+    # On partial feed loss, close every position that still has a fresh executable
+    # paper mark and retry only the unresolved symbols; never use stale prices.
+    state.last_prices.update(fresh_prices)
+    loss_limit = float(core.CAPITAL) * float(core.DAILY_LOSS_CAP_PCT) / 100.0
+    marked_pnl = core.marked_day_pnl(state)
+    if not state.daily_loss_cap_triggered and marked_pnl > -loss_limit:
+        return False
+
+    state.daily_loss_cap_triggered = True
+    state.halted = True
+    unresolved = list(missing)
+    for symbol, price in fresh_prices.items():
+        if symbol not in state.positions:
+            continue
+        try:
+            closed = core.close_position(state, symbol, price, "daily_loss_cap", now)
+        except Exception as exc:
+            print(f"[HALT] daily-loss liquidation failed for {symbol} ({type(exc).__name__})")
+            closed = False
+        if not closed or symbol in state.positions:
+            unresolved.append(symbol)
+
+    if unresolved or state.positions:
+        remaining = sorted(set(unresolved) | set(state.positions))
+        notify.send(
+            "🛑 DAILY LOSS CAP HIT: entries locked; liquidation is incomplete for "
+            f"{', '.join(remaining)}. Fresh-quote close will be retried.",
+            once_key="nifty50-daily-cap-liquidation-pending",
+        )
+        return False
+
+    notify.send(
+        f"🛑 DAILY LOSS CAP HIT ({marked_pnl:+.2f}, limit -{loss_limit:.2f}). "
+        "All paper positions closed and new entries locked for this session.",
+        once_key="nifty50-daily-cap-liquidated",
+    )
+    return True
+
+
 def _persist_ai_plan(plan, now):
     result = core.SB.table("paper_trades").insert({
         "ts": now.isoformat(),
@@ -144,10 +216,22 @@ def _apply_plans(state, result, now):
         state.day_pnl -= plan.entry_fee
         state.last_prices[plan.symbol] = plan.market_price
         state.done_symbols.add(plan.symbol)
+        technical = getattr(plan, "technical_evidence", None) or {}
+        sentiment = getattr(plan, "sentiment_evidence", None) or {}
         notify.send(
-            f"🤖 NIFTY50 PAPER ENTRY {plan.side} {plan.quantity} {plan.symbol} "
-            f"@ {plan.entry_fill:.2f} | SL {plan.stop:.2f} TP {plan.target:.2f} "
-            f"| AI {plan.confidence:.0%} rank #{plan.rank} | Risk verdict: APPROVED | {plan.reason}"
+            f"🤖 NIFTY50 PAPER ENTRY · Trade ID: {position.row_id}\n"
+            f"Recommendation: TAKE · AI confidence: {plan.confidence:.0%} · Rank: #{plan.rank}\n"
+            f"{plan.side} {plan.quantity} {plan.symbol} @ ₹{plan.entry_fill:.2f} "
+            f"· SL ₹{plan.stop:.2f} · TP ₹{plan.target:.2f}\n"
+            f"Risk verdict: APPROVED · {plan.reason}\n"
+            f"Technical: trend={technical.get('trend', 'n/a')}, "
+            f"EMA20={technical.get('ema20', 'n/a')}, VWAP={technical.get('vwap', 'n/a')}, "
+            f"ATR14={technical.get('atr14', 'n/a')}, extension_ATR={technical.get('extension_atr', 'n/a')}\n"
+            f"Sentiment (context only): news={sentiment.get('news_score', 'n/a')} "
+            f"[{sentiment.get('news_status', 'unavailable')}], "
+            f"social={sentiment.get('social_score', 'n/a')} "
+            f"[{sentiment.get('social_status', 'unavailable')}], "
+            f"combined={sentiment.get('combined_score', 'n/a')}"
         )
         webhook.emit("trade.opened", now, {
             "trade_id": position.row_id, "symbol": plan.symbol, "side": plan.side,
@@ -439,7 +523,8 @@ def run():
             elif clock >= core.RANGE_END:
                 protection_event = _apply_deterministic_protection(state, now, settings)
                 core.manage_positions(state, now)
-                core.check_daily_cap(state)
+                cap_triggered = core.check_daily_cap(state)
+                _enforce_daily_loss_cap(state, now, cap_triggered)
                 review_due = bool(settings.get("ai_position_management_enabled", True)) and bool(state.positions) and (protection_event or
                     last_position_review is None or
                     (now - last_position_review).total_seconds() >= int(settings["position_review_seconds"])
