@@ -216,8 +216,8 @@ def _apply_plans(state, result, now):
         state.day_pnl -= plan.entry_fee
         state.last_prices[plan.symbol] = plan.market_price
         state.done_symbols.add(plan.symbol)
-        technical = plan.technical_evidence or {}
-        sentiment = plan.sentiment_evidence or {}
+        technical = getattr(plan, "technical_evidence", None) or {}
+        sentiment = getattr(plan, "sentiment_evidence", None) or {}
         notify.send(
             f"🤖 NIFTY50 PAPER ENTRY · Trade ID: {position.row_id}\n"
             f"Recommendation: TAKE · AI confidence: {plan.confidence:.0%} · Rank: #{plan.rank}\n"
