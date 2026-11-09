@@ -212,14 +212,14 @@ def _apply_plans(state, result, now):
         technical = plan.technical_evidence or {}
         sentiment = plan.sentiment_evidence or {}
         notify.send(
-            f"🤖 NIFTY50 PAPER ENTRY · Trade ID: {position.row_id}\\n"
-            f"Recommendation: TAKE · AI confidence: {plan.confidence:.0%} · Rank: #{plan.rank}\\n"
+            f"🤖 NIFTY50 PAPER ENTRY · Trade ID: {position.row_id}\n"
+            f"Recommendation: TAKE · AI confidence: {plan.confidence:.0%} · Rank: #{plan.rank}\n"
             f"{plan.side} {plan.quantity} {plan.symbol} @ ₹{plan.entry_fill:.2f} "
-            f"· SL ₹{plan.stop:.2f} · TP ₹{plan.target:.2f}\\n"
-            f"Risk verdict: APPROVED · {plan.reason}\\n"
+            f"· SL ₹{plan.stop:.2f} · TP ₹{plan.target:.2f}\n"
+            f"Risk verdict: APPROVED · {plan.reason}\n"
             f"Technical: trend={technical.get('trend', 'n/a')}, "
             f"EMA20={technical.get('ema20', 'n/a')}, VWAP={technical.get('vwap', 'n/a')}, "
-            f"ATR14={technical.get('atr14', 'n/a')}, extension_ATR={technical.get('extension_atr', 'n/a')}\\n"
+            f"ATR14={technical.get('atr14', 'n/a')}, extension_ATR={technical.get('extension_atr', 'n/a')}\n"
             f"Sentiment (context only): news={sentiment.get('news_score', 'n/a')} "
             f"[{sentiment.get('news_status', 'unavailable')}], "
             f"social={sentiment.get('social_score', 'n/a')} "
