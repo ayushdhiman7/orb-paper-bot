@@ -183,3 +183,87 @@ def test_websocket_open_is_not_ready_until_first_valid_quote():
 
     assert feed.connected is True
     assert feed.last("RELIANCE.NS") == 2500.0
+
+
+def test_snap_quote_exposes_best_bid_ask_and_day_turnover():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+    feed._on_data(None, {
+        **packet(price=2500, volume=2000),
+        "average_traded_price": 2490 * 100,
+        "best_5_buy_data": [
+            {"price": 2499 * 100, "quantity": 100, "no of orders": 2},
+            {"price": 2498 * 100, "quantity": 200, "no of orders": 3},
+        ],
+        "best_5_sell_data": [
+            {"price": 2501 * 100, "quantity": 150, "no of orders": 2},
+            {"price": 2502 * 100, "quantity": 250, "no of orders": 3},
+        ],
+    })
+    evidence = feed.quote("RELIANCE.NS")
+    assert evidence["bid"] == 2499.0
+    assert evidence["ask"] == 2501.0
+    assert evidence["average_traded_price"] == 2490.0
+    assert evidence["day_traded_value"] == 4_980_000.0
+
+
+def test_snap_quote_missing_depth_keeps_spread_missing():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+    feed._on_data(None, packet())
+    evidence = feed.quote("RELIANCE.NS")
+    assert evidence["bid"] is None
+    assert evidence["ask"] is None
+
+
+def test_real_smartapi_sdk_binary_snap_quote_parser_feeds_bid_ask_into_adapter():
+    """Exercise the installed Angel One SDK parser with a SNAP_QUOTE-shaped packet."""
+    import struct
+    from SmartApi.smartWebSocketV2 import SmartWebSocketV2
+
+    stamp = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST)
+    packet_bytes = bytearray(379)
+
+    def put(fmt, offset, value):
+        struct.pack_into("<" + fmt, packet_bytes, offset, value)
+
+    put("B", 0, 3)  # SNAP_QUOTE
+    put("B", 1, 1)  # NSE cash
+    packet_bytes[2:27] = b"2885".ljust(25, b"\x00")
+    put("q", 27, 123456)
+    put("q", 35, int(stamp.timestamp() * 1000))
+    put("q", 43, 2500 * 100)
+    put("q", 51, 10)
+    put("q", 59, 2490 * 100)
+    put("q", 67, 2000)
+    put("d", 75, 1000.0)
+    put("d", 83, 900.0)
+    put("q", 91, 2480 * 100)
+    put("q", 99, 2520 * 100)
+    put("q", 107, 2470 * 100)
+    put("q", 115, 2490 * 100)
+    put("q", 123, int(stamp.timestamp() * 1000))
+
+    # SDK maps flag=1 rows into its normalized best_5_buy_data field and
+    # flag=0 rows into best_5_sell_data (the SDK performs this swap itself).
+    for i in range(10):
+        offset = 147 + i * 20
+        is_bid = i < 5
+        put("H", offset, 1 if is_bid else 0)
+        put("q", offset + 2, 100 + i)
+        put("q", offset + 10, (2499 if is_bid else 2501 + i - 5) * 100)
+        put("H", offset + 18, 2)
+
+    sdk = SmartWebSocketV2.__new__(SmartWebSocketV2)
+    parsed = sdk._parse_binary_data(bytes(packet_bytes))
+    now = stamp.timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+    feed._on_data(None, parsed)
+
+    evidence = feed.quote("RELIANCE.NS")
+    assert evidence is not None
+    assert evidence["price"] == 2500.0
+    assert evidence["bid"] == 2499.0
+    assert evidence["ask"] == 2501.0
+    assert evidence["average_traded_price"] == 2490.0
+    assert evidence["day_traded_value"] == 4_980_000.0

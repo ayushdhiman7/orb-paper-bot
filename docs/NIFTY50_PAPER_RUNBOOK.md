@@ -122,3 +122,19 @@ The final comparison must run the same market data and cost model across the det
 ## EC2 service configuration\n\nThe checked-in deploy/orb-bot.service template is the Nifty 50 runner service definition. It explicitly sets ORB_RUNTIME_MODE=nifty50_batch, uses nifty50_runner.py, and does not auto-restart the process. Use the staged migration and rollback procedure in NIFTY50_EC2_MIGRATION.md; do not run the full installer as a shortcut because it also installs dependencies and enables multiple timers.\n\n## Operator-owned steps / explicit exclusions
 
 The actual-account SNAP_QUOTE test and EC2 service/deployment changes require the operator's authenticated account and approval. The five Phase 3 schema migrations listed above were applied to connected project gbqmvnekxsckzjzcorac on 2026-11-04. The additional direct-client-access hardening migration (202611090001) is merged to the repository but has NOT been applied to the connected project. Review its dashboard/API impact before applying. The EC2 bot service remains user-managed and untouched.
+
+
+## Under-₹25 research scanner — historical liquidity cache
+
+The under-₹25 scanner is a separate research-only path; it is not wired into the Nifty 50 runner and cannot place orders. Its 20-session average daily traded value is calculated as daily candle close (₹) × volume, using completed sessions strictly before the requested `as_of` date.
+
+The cache implementation is in `liquidity_history.py`:
+
+- SQLite cache defaults to `.low_price_cache/liquidity.sqlite3`; override with `LOW_PRICE_LIQUIDITY_CACHE`.
+- Entries are keyed by symbol, Angel One token, and `as_of` date. A token change cannot silently reuse another instrument's history.
+- Cache TTL defaults to 24 hours. Expired entries are refreshed from Angel One `ONE_DAY` candles, bypassing the older raw-candle cache so stale history is not reintroduced.
+- A 60-calendar-day lookback is requested to obtain at least 20 completed market sessions.
+- Fewer than 20 valid sessions, duplicate dates, malformed values, or missing tokens exclude that symbol. The selector receives no fabricated liquidity value.
+- An Angel One access-rate block stops the batch immediately. No retry loop across the remaining symbols is performed by this loader.
+
+The loader is a library function, not a scheduled job. It must be called deliberately by a research orchestration task and its `errors` result must be surfaced in the run report. No live-account historical request has been made as part of this change.

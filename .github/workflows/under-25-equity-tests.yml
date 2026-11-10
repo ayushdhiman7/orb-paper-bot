@@ -1,0 +1,27 @@
+name: under-25-equity-tests
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "low_price_universe.py"
+      - "angel_websocket.py"
+      - "liquidity_history.py"
+      - "test_angel_websocket.py"
+      - "test_liquidity_history.py"
+      - "test_low_price_universe.py"
+      - "under_25_research.py"
+      - "test_under_25_research.py"
+      - ".github/workflows/under-25-equity-tests.yml"
+
+jobs:
+  under-25-equity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest -r requirements-angelone-test.txt
+      - run: python -m pytest -q test_low_price_universe.py test_liquidity_history.py test_angel_websocket.py test_under_25_research.py

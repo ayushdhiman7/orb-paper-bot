@@ -158,13 +158,35 @@ class AngelWebSocketFeed:
                 return
             event_time = self._timestamp(packet)
             received_at = self._clock()
+            # SNAP_QUOTE mode includes five bid and five ask levels. The official
+            # SmartAPI SDK exposes these as parsed arrays; never infer spread from LTP.
+            buy_levels = packet.get("best_5_buy_data") or []
+            sell_levels = packet.get("best_5_sell_data") or []
+            bids = [
+                float(level.get("price", 0)) / 100.0
+                for level in buy_levels
+                if isinstance(level, dict) and float(level.get("price", 0) or 0) > 0
+                and int(level.get("quantity", 0) or 0) > 0
+            ]
+            asks = [
+                float(level.get("price", 0)) / 100.0
+                for level in sell_levels
+                if isinstance(level, dict) and float(level.get("price", 0) or 0) > 0
+                and int(level.get("quantity", 0) or 0) > 0
+            ]
+            volume = int(packet.get("volume_trade_for_the_day") or 0)
+            average_price = float(packet.get("average_traded_price") or 0) / 100.0
             quote = {
                 "symbol": symbol,
                 "price": price,
                 "event_time": event_time,
                 "received_at": received_at,
-                "volume_trade_for_the_day": int(packet.get("volume_trade_for_the_day") or 0),
+                "volume_trade_for_the_day": volume,
                 "last_traded_quantity": int(packet.get("last_traded_quantity") or 0),
+                "bid": max(bids) if bids else None,
+                "ask": min(asks) if asks else None,
+                "average_traded_price": average_price if average_price > 0 else None,
+                "day_traded_value": average_price * volume if average_price > 0 and volume > 0 else None,
             }
             with self._lock:
                 self.latest[symbol] = quote
@@ -260,6 +282,11 @@ class AngelWebSocketFeed:
                 "price": quote["price"],
                 "event_time": quote["event_time"],
                 "received_at": quote["received_at"],
+                "bid": quote["bid"],
+                "ask": quote["ask"],
+                "average_traded_price": quote["average_traded_price"],
+                "volume_trade_for_the_day": quote["volume_trade_for_the_day"],
+                "day_traded_value": quote["day_traded_value"],
             }
 
     def last(self, symbol, now=None):
