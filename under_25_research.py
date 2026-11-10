@@ -81,23 +81,40 @@ def build_research_report(*, instruments, quotes, average_values, history_errors
     return report
 
 
-def run_research_scan(*, master, feed, angel_client, as_of=None, generated_at=None,
-                      cache=None, quote_timeout_seconds=90, config=LowPriceConfig()):
+def run_research_scan(*, master, feed_factory, angel_client, as_of=None, generated_at=None,
+                      cache=None, quote_timeout_seconds=90, config=LowPriceConfig(),
+                      subscription_batch_size=900):
     as_of = as_of or datetime.now(IST).date()
     generated_at = generated_at or datetime.now(IST)
     instruments = parse_nse_cash_equities(master)
     if not instruments:
         raise RuntimeError("No valid NSE cash EQ instruments found in scrip master")
-    # The SmartAPI V2 session quota is 1,000 tokens. Keep this separate scan below it.
-    if len(instruments) > 1000:
-        raise RuntimeError("NSE cash universe exceeds the 1,000-token WebSocket session quota")
-    feed.start()
-    try:
-        quotes = wait_for_quotes(feed, instruments, timeout_seconds=quote_timeout_seconds)
-    finally:
-        feed.stop()
+    # SmartAPI permits at most 1,000 subscribed tokens per WebSocket session.
+    if not 1 <= subscription_batch_size <= 1000:
+        raise ValueError("subscription_batch_size must be between 1 and 1,000")
+    quotes = {}
+    for offset in range(0, len(instruments), subscription_batch_size):
+        batch = instruments[offset:offset + subscription_batch_size]
+        token_map = {row["symbol"]: row["token"] for row in batch}
+        feed = feed_factory(batch, token_map)
+        feed.start()
+        try:
+            quotes.update(wait_for_quotes(feed, batch, timeout_seconds=quote_timeout_seconds))
+        finally:
+            feed.stop()
+    # Fetch expensive 20-session history only for symbols whose fresh quote is
+    # already at/below the configured price ceiling. The selector still receives
+    # the full universe and rejects any symbol without a validated history value.
+    price_candidates = []
+    for instrument in instruments:
+        quote = quotes.get(instrument["symbol"])
+        try:
+            if quote is not None and 0 < float(quote["price"]) <= float(config.max_price):
+                price_candidates.append(instrument)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
     values, errors = load_average_daily_values(
-        instruments, angel_client=angel_client, as_of=as_of, cache=cache,
+        price_candidates, angel_client=angel_client, as_of=as_of, cache=cache,
         now_epoch=generated_at.timestamp(),
     )
     return build_research_report(
@@ -123,10 +140,10 @@ def main():
     if not instruments:
         raise SystemExit("No NSE cash EQ instruments found.")
     # Keep WebSocket subscriptions within the SmartAPI 1,000-token limit.
-    token_map = {row["symbol"]: row["token"] for row in instruments}
-    feed = AngelWebSocketFeed([row["symbol"] for row in instruments], token_map=token_map)
+    def feed_factory(batch, token_map):
+        return AngelWebSocketFeed([row["symbol"] for row in batch], token_map=token_map)
     client = AngelClient()
-    report = run_research_scan(master=master, feed=feed, angel_client=client)
+    report = run_research_scan(master=master, feed_factory=feed_factory, angel_client=client)
     output = Path(os.getenv("LOW_PRICE_REPORT_PATH", "reports/under-25-research-latest.json"))
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
