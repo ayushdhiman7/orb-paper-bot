@@ -65,3 +65,26 @@ def test_accepts_balanced_profit_protection_thresholds():
         "protected_profit_r": 0.5,
         "trailing_start_r": 2.0,
     })
+
+
+def test_under_25_report_endpoint_serves_only_valid_research_report(tmp_path, monkeypatch):
+    report_path = tmp_path / "report.json"
+    report_path.write_text('{"mode":"research_only","paper_only":true,"orders_submitted":0,"candidates":[]}')
+    monkeypatch.setenv("LOW_PRICE_REPORT_PATH", str(report_path))
+    assert dashboard_api.under_25_research_report()["orders_submitted"] == 0
+
+
+def test_under_25_report_endpoint_rejects_non_research_payload(tmp_path, monkeypatch):
+    report_path = tmp_path / "report.json"
+    report_path.write_text('{"mode":"live","paper_only":false}')
+    monkeypatch.setenv("LOW_PRICE_REPORT_PATH", str(report_path))
+    with pytest.raises(HTTPException) as error:
+        dashboard_api.under_25_research_report()
+    assert error.value.status_code == 503
+
+
+def test_under_25_report_endpoint_returns_not_found_before_first_scan(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOW_PRICE_REPORT_PATH", str(tmp_path / "missing.json"))
+    with pytest.raises(HTTPException) as error:
+        dashboard_api.under_25_research_report()
+    assert error.value.status_code == 404
