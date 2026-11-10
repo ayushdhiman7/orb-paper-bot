@@ -147,7 +147,7 @@ def main():
         return AngelWebSocketFeed([row["symbol"] for row in batch], token_map=token_map)
     client = AngelClient()
     report = run_research_scan(master=master, feed_factory=feed_factory, angel_client=client)
-    output = Path(os.getenv("LOW_PRICE_REPORT_PATH", "reports/under-25-research-latest.json"))
+    output = Path(os.getenv("LOW_PRICE_REPORT_PATH", str(Path.home() / "orb-paper-bot" / "reports" / "under-25-research-latest.json")))
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
     temporary.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
