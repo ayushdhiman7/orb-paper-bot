@@ -33,3 +33,16 @@ def test_ranks_by_turnover_and_caps_results():
 
 def test_rejects_invalid_config():
     with pytest.raises(ValueError): LowPriceConfig(max_price=0)
+
+def test_rejects_duplicate_rows_even_when_token_matches():
+    rows=[{'exch_seg':'nse_cm','symbol':'ABC-EQ','token':'101'},{'exch_seg':'nse_cm','symbol':'ABC-EQ','token':'101'}]
+    with pytest.raises(LowPriceUniverseError, match='Ambiguous'):
+        parse_nse_cash_equities(rows)
+
+def test_converts_master_tick_size_from_paise_to_rupees():
+    rows=[{'exch_seg':'nse_cm','symbol':'ABC-EQ','token':'101','tick_size':'5.000000'}]
+    assert parse_nse_cash_equities(rows)[0]['tick_size_rupees'] == 0.05
+
+def test_rejects_non_finite_quote_timestamp():
+    result=select_under_25_candidates(instruments(), {'ABC':quote(received=float('nan'))}, {'ABC':100_000_000}, now_epoch=1000)
+    assert result == []
