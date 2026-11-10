@@ -38,7 +38,7 @@ def test_daily_loss_cap_closes_every_open_paper_position(monkeypatch):
     assert any("All paper positions closed" in message for message in alerts)
 
 
-def test_daily_loss_cap_waits_for_fresh_quote_and_keeps_entries_halted(monkeypatch):
+def test_daily_loss_cap_waits_for_fresh_quote_and_blocks_entries(monkeypatch):
     state = _state(["RELIANCE", "TCS"], -50.0)
     closed = []
 
@@ -56,7 +56,8 @@ def test_daily_loss_cap_waits_for_fresh_quote_and_keeps_entries_halted(monkeypat
     monkeypatch.setattr(runner.notify, "send", lambda *args, **kwargs: None)
 
     assert runner._enforce_daily_loss_cap(state, None) is False
-    assert state.halted is True
+    assert state.risk_mark_blocked is True
+    assert state.halted is False
     assert set(state.positions) == {"RELIANCE", "TCS"}
     assert closed == []
 

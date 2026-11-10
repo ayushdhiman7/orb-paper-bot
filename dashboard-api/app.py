@@ -138,7 +138,7 @@ def _verify_webhook(raw_body: bytes, timestamp: str, signature: str) -> bool:
         digestmod="sha256",
     ).hexdigest()
     supplied = signature[len("sha256="):]
-    return hmac.compare_digest(expected, supplied)
+    return hmac.compare_digest(expected.encode(), supplied.encode())
 
 
 def _persist_dashboard_event(payload: dict) -> dict | None:
@@ -347,7 +347,7 @@ def _create_manual_exit_request(trade_id: int) -> dict:
 async def request_manual_exit(trade_id: int, request: Request):
     expected = _dashboard_control_token()
     supplied = request.headers.get("Authorization", "")
-    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:], expected):
+    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:].encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Manual exit authorization failed")
     if trade_id <= 0:
         raise HTTPException(status_code=422, detail="Invalid trade ID")
@@ -461,7 +461,7 @@ async def get_bot_settings():
 async def update_bot_settings(request: Request):
     expected = _dashboard_control_token()
     supplied = request.headers.get("Authorization", "")
-    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:], expected):
+    if not expected or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:].encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Settings authorization failed")
     try:
         payload = await request.json()
