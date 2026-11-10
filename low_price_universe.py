@@ -4,6 +4,7 @@ This module does not connect to Angel One, place orders, or alter the Nifty 50 r
 from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import math
 from typing import Iterable, Mapping
 
 class LowPriceUniverseError(ValueError):
@@ -49,8 +50,16 @@ def parse_nse_cash_equities(master: Iterable[Mapping]) -> list[dict]:
         if not symbol or not token.isdigit():
             continue
         record = {"symbol": symbol, "tradingsymbol": trading_symbol, "token": token, "exchange": "NSE", "tick_size": row.get("tick_size")}
-        if symbol in by_symbol and by_symbol[symbol]["token"] != token:
+        if symbol in by_symbol:
             duplicates.add(symbol)
+        tick_size_raw = row.get("tick_size")
+        try:
+            tick_size_paise = Decimal(str(tick_size_raw))
+            if not tick_size_paise.is_finite() or tick_size_paise <= 0:
+                raise InvalidOperation
+            record["tick_size_rupees"] = tick_size_paise / Decimal("100")
+        except (InvalidOperation, TypeError, ValueError):
+            record["tick_size_rupees"] = None
         by_symbol[symbol] = record
     if duplicates:
         raise LowPriceUniverseError("Ambiguous NSE cash tokens: " + ", ".join(sorted(duplicates)))
@@ -70,6 +79,8 @@ def select_under_25_candidates(instruments, quotes, avg_daily_values, *, now_epo
             ask = _decimal(quote.get("ask"), "ask")
             received = float(quote.get("received_at"))
             avg_value = _decimal(avg_daily_values.get(symbol), "average daily traded value")
+            if not math.isfinite(received) or not math.isfinite(float(now_epoch)):
+                continue
         except (ValueError, TypeError, OverflowError):
             continue
         if price <= 0 or bid <= 0 or ask < bid or avg_value < config.min_avg_daily_value:
