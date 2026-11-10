@@ -229,7 +229,7 @@ def test_real_smartapi_sdk_binary_snap_quote_parser_feeds_bid_ask_into_adapter()
 
     put("B", 0, 3)  # SNAP_QUOTE
     put("B", 1, 1)  # NSE cash
-    packet_bytes[2:27] = b"2885".ljust(25, b"\\x00")
+    packet_bytes[2:27] = b"2885".ljust(25, b"\x00")
     put("q", 27, 123456)
     put("q", 35, int(stamp.timestamp() * 1000))
     put("q", 43, 2500 * 100)
