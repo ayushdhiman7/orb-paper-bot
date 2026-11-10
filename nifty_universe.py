@@ -11,7 +11,9 @@ import io
 import json
 import os
 import tempfile
-import urllib.request
+import time
+
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +60,10 @@ def parse_nse_constituents(csv_text):
     return symbols
 
 
+# Angel's public scrip master labels cash-market rows NSE; older fixtures used nse_cm.
+NSE_CASH_SEGMENTS = {'nse', 'nse_cm'}
+
+
 def parse_angel_master(payload):
     """Return unique NSE cash-equity symbol -> token mappings from Angel master JSON."""
     try:
@@ -69,7 +75,7 @@ def parse_angel_master(payload):
     found = {}
     duplicates = set()
     for row in rows:
-        if not isinstance(row, dict) or _text(row.get("exch_seg")).lower() != "nse_cm":
+        if not isinstance(row, dict) or _text(row.get("exch_seg")).lower() not in NSE_CASH_SEGMENTS:
             continue
         tradingsymbol = _text(row.get("symbol")).upper()
         if not tradingsymbol.endswith("-EQ"):
@@ -101,23 +107,56 @@ def build_nifty50_universe(nse_csv, angel_master):
     ]
 
 
-def _download(url, max_bytes=8_000_000):
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Mozilla/5.0 ORB-paper-bot/1.0", "Accept": "application/json,text/csv,*/*"},
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        data = response.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise UniverseError("Downloaded instrument data exceeds the configured size limit")
-    return data
+def _download(session, url, max_bytes, referer=None, attempts=3):
+    """Download official source data with bounded retries and size validation."""
+    headers = {"Accept": "application/json,text/csv,*/*"}
+    if referer:
+        headers["Referer"] = referer
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            with session.get(url, headers=headers, timeout=(8, 35), stream=True) as response:
+                response.raise_for_status()
+                length = response.headers.get("Content-Length")
+                if length and int(length) > max_bytes:
+                    raise UniverseError(f"Download exceeds configured size limit: {url}")
+                data = bytearray()
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise UniverseError(f"Download exceeds configured size limit: {url}")
+                if not data:
+                    raise UniverseError(f"Empty download: {url}")
+                return bytes(data)
+        except UniverseError:
+            raise
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(2 ** attempt)
+    raise UniverseError(f"Failed to download {url} after {attempts} attempts: {last_error}")
 
 
 def fetch_nifty50_universe():
-    """Fetch official current sources and return a fully validated 50-symbol universe."""
-    nse_csv = _download(NSE_CONSTITUENTS_URL).decode("utf-8-sig")
-    angel_master = _download(ANGEL_MASTER_URL)
-    return build_nifty50_universe(nse_csv, angel_master)
+    """Fetch official sources using an NSE-warmed session and validate all 50."""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        try:  # NSE homepage may 403 from cloud IPs; the archive CSV can still work afterwards.
+            session.get("https://www.nseindia.com/", timeout=(8, 12))
+        except requests.RequestException:
+            pass
+        nse_csv = _download(session, NSE_CONSTITUENTS_URL, 1_000_000,
+                            referer="https://www.nseindia.com/").decode("utf-8-sig")
+        angel_master = _download(session, ANGEL_MASTER_URL, 50_000_000)
+        return build_nifty50_universe(nse_csv, angel_master)
+    finally:
+        session.close()
 
 
 def write_universe_cache(universe, path):

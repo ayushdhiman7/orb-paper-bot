@@ -68,3 +68,10 @@ def test_cache_is_atomic_and_contains_source_metadata(tmp_path):
     saved = json.loads(path.read_text())
     assert len(saved["instruments"]) == 50
     assert saved["source"]["constituents"].startswith("https://")
+
+
+def test_parse_accepts_angel_master_nse_segment_label():
+    rows = [{"exch_seg": "NSE", "symbol": "RELIANCE-EQ", "token": "2885"},
+            {"exch_seg": "BSE", "symbol": "RELIANCE-EQ", "token": "1"},
+            {"exch_seg": "NFO", "symbol": "RELIANCE-EQ", "token": "2"}]
+    assert len(parse_angel_master(rows)) == 1
