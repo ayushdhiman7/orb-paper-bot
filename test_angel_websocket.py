@@ -183,3 +183,34 @@ def test_websocket_open_is_not_ready_until_first_valid_quote():
 
     assert feed.connected is True
     assert feed.last("RELIANCE.NS") == 2500.0
+
+
+def test_snap_quote_exposes_best_bid_ask_and_day_turnover():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+    feed._on_data(None, {
+        **packet(price=2500, volume=2000),
+        "average_traded_price": 2490 * 100,
+        "best_5_buy_data": [
+            {"price": 2499 * 100, "quantity": 100, "no of orders": 2},
+            {"price": 2498 * 100, "quantity": 200, "no of orders": 3},
+        ],
+        "best_5_sell_data": [
+            {"price": 2501 * 100, "quantity": 150, "no of orders": 2},
+            {"price": 2502 * 100, "quantity": 250, "no of orders": 3},
+        ],
+    })
+    evidence = feed.quote("RELIANCE.NS")
+    assert evidence["bid"] == 2499.0
+    assert evidence["ask"] == 2501.0
+    assert evidence["average_traded_price"] == 2490.0
+    assert evidence["day_traded_value"] == 4_980_000.0
+
+
+def test_snap_quote_missing_depth_keeps_spread_missing():
+    now = datetime(2026, 10, 30, 9, 15, 1, tzinfo=IST).timestamp()
+    feed = AngelWebSocketFeed(["RELIANCE.NS"], clock=lambda: now)
+    feed._on_data(None, packet())
+    evidence = feed.quote("RELIANCE.NS")
+    assert evidence["bid"] is None
+    assert evidence["ask"] is None
