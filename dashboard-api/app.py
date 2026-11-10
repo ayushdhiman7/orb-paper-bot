@@ -484,6 +484,24 @@ async def update_bot_settings(request: Request):
             "version": rows[0]["version"], "updated_at": rows[0]["updated_at"]}
 
 
+@app.get("/api/research/under-25")
+def under_25_research_report():
+    """Serve only the sanitized, research-only JSON report produced by under_25_research.py."""
+    report_path = Path(os.getenv(
+        "LOW_PRICE_REPORT_PATH",
+        str(Path.home() / "orb-paper-bot" / "reports" / "under-25-research-latest.json"),
+    ))
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No under-₹25 research report is available yet")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=503, detail="Under-₹25 research report is unreadable")
+    if not isinstance(payload, dict) or payload.get("mode") != "research_only" or payload.get("paper_only") is not True:
+        raise HTTPException(status_code=503, detail="Under-₹25 report failed its safety validation")
+    return payload
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
