@@ -159,7 +159,7 @@ def load_average_daily_values(
             )
             if candles is None:
                 candles = angel_client.candles(
-                    token, start, end, interval="ONE_DAY", exchange="NSE", use_cache=True
+                    token, start, end, interval="ONE_DAY", exchange="NSE", use_cache=False
                 )
                 # Validate before persisting: partial or malformed history never becomes trusted cache.
                 value = average_daily_traded_value(candles, as_of=as_of, min_sessions=min_sessions)
