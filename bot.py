@@ -264,6 +264,23 @@ def size_position(price: float, stop: float, cash: float = None) -> int:
     return max(0, min(qty_by_risk, qty_by_cash))
 
 
+def volume_surge_ratio(df):
+    """Recent volume vs a typical minute today, or None if not computable.
+
+    Uses the median per-minute volume (robust to the heavy 09:15 auction bar) and drops the
+    still-forming last bar so the ratio isn't biased low by a partial minute.
+    """
+    if df is None or df.empty or "Volume" not in df.columns:
+        return None
+    vol = df["Volume"].astype(float).iloc[1:-1]   # skip opening-auction bar and the incomplete last bar
+    if len(vol) < 10:
+        return None
+    typical = float(vol.median())
+    if typical <= 0:
+        return None
+    return round(float(vol.tail(5).mean()) / typical, 2)
+
+
 def ask_ai(symbol, side, price, stop, target, rng, now):
     """Small fact sheet about this breakout, sent to the AI for a take/skip opinion. Never raises."""
     if not os.getenv("GEMINI_API_KEY", "").strip():
@@ -279,8 +296,9 @@ def ask_ai(symbol, side, price, stop, target, rng, now):
             ctx["day_open"] = round(day_open, 2)
             ctx["move_since_open_pct"] = round((price - day_open) / day_open * 100, 2)
             ctx["last_12_five_min_closes"] = [round(float(x), 2) for x in df["Close"].resample("5min").last().dropna().tail(12)]
-            if "Volume" in df.columns and float(df["Volume"].mean()) > 0:
-                ctx["volume_last_5min_vs_day_average"] = round(float(df["Volume"].tail(5).mean() / df["Volume"].mean()), 2)
+            ratio = volume_surge_ratio(df)
+            if ratio is not None:
+                ctx["volume_last_5min_vs_typical_minute"] = ratio
         return llm_gate.review(ctx)
     except Exception as e:  # the AI is optional: never let it break trading
         print(f"[warn] AI review skipped: {type(e).__name__}")
