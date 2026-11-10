@@ -41,7 +41,7 @@ def parse_nse_cash_equities(master: Iterable[Mapping]) -> list[dict]:
         raise LowPriceUniverseError("Instrument master must be a list")
     by_symbol, duplicates = {}, set()
     for row in master:
-        if not isinstance(row, Mapping) or str(row.get("exch_seg", "")).strip().lower() != "nse_cm":
+        if not isinstance(row, Mapping) or str(row.get("exch_seg", "")).strip().lower() not in {"nse", "nse_cm"}:
             continue
         trading_symbol = str(row.get("symbol", "")).strip().upper()
         if not trading_symbol.endswith("-EQ"):

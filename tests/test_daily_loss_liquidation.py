@@ -106,3 +106,32 @@ def test_daily_loss_cap_closes_fresh_positions_while_retrying_missing_symbol(mon
     assert state.halted is True
     assert closed == [("RELIANCE", 100.0, "daily_loss_cap")]
     assert set(state.positions) == {"TCS"}
+
+
+def test_square_off_uses_last_mark_flagged_estimated_when_quote_missing(monkeypatch):
+    from datetime import datetime, time
+    state = _state(["RELIANCE", "TCS"], 0.0)
+    state.last_prices = {"RELIANCE": 101.0}
+    calls = []
+    monkeypatch.setattr(runner.core, "SQUARE_OFF_FALLBACK", time(15, 25))
+    monkeypatch.setattr(runner.core, "last_price", lambda symbol: 100.0 if symbol == "TCS" else None)
+
+    def close_position(current, symbol, price, reason, now, note=None, estimated=False):
+        calls.append((symbol, price, estimated))
+        current.positions.pop(symbol)
+        return True
+
+    monkeypatch.setattr(runner.core, "close_position", close_position)
+    runner._square_off_all(state, datetime(2026, 11, 11, 15, 31))
+    assert sorted(calls) == [("RELIANCE", 101.0, True), ("TCS", 100.0, False)]
+
+
+def test_square_off_before_fallback_waits_for_quote(monkeypatch):
+    from datetime import datetime, time
+    state = _state(["RELIANCE"], 0.0)
+    state.last_prices = {"RELIANCE": 101.0}
+    monkeypatch.setattr(runner.core, "SQUARE_OFF_FALLBACK", time(15, 25))
+    monkeypatch.setattr(runner.core, "last_price", lambda symbol: None)
+    monkeypatch.setattr(runner.core, "close_position", lambda *a, **k: (_ for _ in ()).throw(AssertionError("closed")))
+    runner._square_off_all(state, datetime(2026, 11, 11, 15, 10))
+    assert "RELIANCE" in state.positions

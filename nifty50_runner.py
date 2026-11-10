@@ -447,6 +447,19 @@ def _send_daily_report(state, now):
         return False
 
 
+def _square_off_all(state, now):
+    """Close every open paper position; after the fallback time use the last known mark (flagged estimated)."""
+    for symbol in list(state.positions):
+        price = core.last_price(symbol)
+        if price is not None:
+            core.close_position(state, symbol, price, "square_off", now)
+        elif now.time() >= core.SQUARE_OFF_FALLBACK and state.last_prices.get(symbol) is not None:
+            core.close_position(
+                state, symbol, state.last_prices[symbol], "square_off", now,
+                note="no fresh quote; closed at last known mark (estimated)", estimated=True,
+            )
+
+
 def run():
     if os.getenv("ORB_RUNTIME_MODE", "").strip().lower() != "nifty50_batch":
         raise RuntimeError("Set ORB_RUNTIME_MODE=nifty50_batch explicitly to run this entry point")
@@ -505,10 +518,7 @@ def run():
                 _emergency_stop(state, now)
             if now.weekday() >= 5 or clock < core.MARKET_OPEN or clock > core.MARKET_CLOSE:
                 if clock > core.MARKET_CLOSE and state.positions:
-                    for symbol in list(state.positions):
-                        price = core.last_price(symbol)
-                        if price is not None:
-                            core.close_position(state, symbol, price, "square_off", now)
+                    _square_off_all(state, now)
                 if now.weekday() < 5 and clock > core.MARKET_CLOSE and not state.positions:
                     if last_daily_report_attempt is None or (now - last_daily_report_attempt).total_seconds() >= 60:
                         _send_daily_report(state, now)
@@ -520,10 +530,7 @@ def run():
 
             core.process_manual_exit_requests(state, now)
             if clock >= core.SQUARE_OFF:
-                for symbol in list(state.positions):
-                    price = core.last_price(symbol)
-                    if price is not None:
-                        core.close_position(state, symbol, price, "square_off", now)
+                _square_off_all(state, now)
             elif clock >= core.RANGE_END:
                 protection_event = _apply_deterministic_protection(state, now, settings)
                 core.manage_positions(state, now)

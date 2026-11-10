@@ -409,7 +409,8 @@ def try_entry(state: State, symbol: str, now: datetime):
     })
 
 
-def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None):
+def close_position(state: State, symbol: str, price: float, reason: str, now: datetime, note: str = None,
+                   estimated: bool = False):
     pos = state.positions[symbol]
     direction = 1 if pos.side == "BUY" else -1
     exit_fill = adverse_fill(price, direction, is_entry=False)
@@ -421,6 +422,7 @@ def close_position(state: State, symbol: str, price: float, reason: str, now: da
         "entry": round(pos.entry, 2), "exit": round(exit_fill, 2),
         "pnl": round(trade_net_pnl, 2), "reason": reason, "mode": "paper",
         **({"llm_reason": ((pos.llm_reason + " | ") if pos.llm_reason else "") + "EXIT: " + note} if note else {}),
+        **({"exit_estimated": True, "exit_source": "last_known_mark"} if estimated else {}),
     }
     try:
         log_trade(row, row_id=pos.row_id)
