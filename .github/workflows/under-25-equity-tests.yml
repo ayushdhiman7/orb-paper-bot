@@ -9,7 +9,7 @@ on:
       - "liquidity_history.py"
       - "test_angel_websocket.py"
       - "test_liquidity_history.py"
-      - "test_low_price_universe.py"
+      - "test_low_price_universe.py"\n      - "under_25_research.py"\n      - "test_under_25_research.py"
       - ".github/workflows/under-25-equity-tests.yml"
 
 jobs:
@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install pytest -r requirements-angelone-test.txt
-      - run: python -m pytest -q test_low_price_universe.py test_liquidity_history.py test_angel_websocket.py
+      - run: python -m pytest -q test_low_price_universe.py test_liquidity_history.py test_angel_websocket.py test_under_25_research.py
