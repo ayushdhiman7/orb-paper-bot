@@ -49,10 +49,18 @@ def start_feed():
         time.sleep(0.2)
         covered, missing = fresh_quote_coverage(universe, feed)
     if covered != 50:
+        thread = getattr(feed, "_thread", None)
+        diagnostics = (
+            f"packets_for_symbols={len(getattr(feed, 'latest', {}) or {})}, "
+            f"connected={getattr(feed, 'connected', None)}, "
+            f"thread_alive={thread.is_alive() if thread is not None else None}, "
+            f"last_error={getattr(feed, 'last_error', None)!r}"
+        )
         feed.stop()
         raise RuntimeError(
             f"Angel One SNAP_QUOTE coverage incomplete ({covered}/50 fresh); "
-            f"missing: {', '.join(missing[:10])}. Refusing partial-universe operation and data fallback."
+            f"missing: {', '.join(missing[:10])}. [{diagnostics}] "
+            "Refusing partial-universe operation and data fallback."
         )
     return universe, feed
 
