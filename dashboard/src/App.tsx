@@ -11,7 +11,7 @@ import {
 import { loadDashboardData, requestManualExit, loadBotSettings, saveBotSettings } from "./lib/supabase";
 import type { BacktestRun, ControlTrade, DashboardRange, PaperTrade, BotSettings } from "./lib/supabase";
 
-type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor" | "Settings";
+type Tab = "Overview" | "Trade journal" | "AI vs no-AI" | "Backtests" | "Risk monitor" | "Under-₹25 research" | "Settings";
 type DashboardData = { trades: PaperTrade[]; openPositions: PaperTrade[]; controls: ControlTrade[]; backtests: BacktestRun[]; backtestsError?: string | null };
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
@@ -141,7 +141,7 @@ function App() {
     { label: "Trade journal", icon: ListFilter, hint: "Entries & exits" , short: "Journal" },
     { label: "AI vs no-AI", icon: Bot, hint: "Control group" , short: "AI" },
     { label: "Backtests", icon: BarChart3, hint: "Strategy research" , short: "Tests" },
-    { label: "Risk monitor", icon: ShieldCheck, hint: "Exposure & limits" , short: "Risk" },
+    { label: "Risk monitor", icon: ShieldCheck, hint: "Exposure & limits" , short: "Risk" },\n    { label: "Under-₹25 research", icon: TrendingUp, hint: "Separate research universe", short: "Under ₹25" },
   ];
 
   return <div className="app-shell">
@@ -173,7 +173,7 @@ function App() {
           </div>
         ) : (
           <>
-            {data.trades.length === 0 && openTrades.length === 0 && (
+            {tab !== "Under-₹25 research" && data.trades.length === 0 && openTrades.length === 0 && (
               <div className="notice error-notice">
                 <ShieldCheck size={16} />
                 <span><strong>No paper trades found for {activeRange}.</strong> Try another range or refresh the data.</span>
@@ -338,6 +338,48 @@ function ResearchPage({runs}:{runs:BacktestRun[]}) {
 }
 
 type NumericSettingKey = Exclude<keyof BotSettings, "square_off_time" | "emergency_stop" | "paper_only">;
+
+function Under25ResearchPage() {
+  const [report, setReport] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [loadingReport, setLoadingReport] = useState(true);
+  const load = useCallback(async () => {
+    setLoadingReport(true); setError("");
+    try {
+      const response = await fetch("/api/research/under-25", { headers: { Accept: "application/json" } });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Unable to load the research report.");
+      setReport(payload);
+    } catch (e) { setError(e instanceof Error ? e.message : "Unable to load the research report."); }
+    finally { setLoadingReport(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  if (loadingReport) return <section className="panel"><p>Loading under-₹25 research report…</p></section>;
+  if (error) return <section className="panel"><div className="notice error-notice"><Database size={16}/><span>{error}</span><button className="text-button" onClick={() => void load()}>Retry</button></div><p>Run the separate research scanner during NSE market hours to generate the first report.</p></section>;
+  const coverage = report?.coverage ?? {};
+  const candidates = Array.isArray(report?.candidates) ? report.candidates : [];
+  return <>
+    <div className="notice"><ShieldCheck size={16}/><span><strong>Research only · Paper only.</strong> This scanner cannot place orders and does not replace the Nifty 50 strategy.</span><button className="text-button" onClick={() => void load()}>Refresh</button></div>
+    <div className="metric-grid">
+      <MetricCard label="Scan status" value={String(report.status ?? "unknown").toUpperCase()} icon={Activity} sub={report.generated_at ? formatDate(report.generated_at) : "No timestamp"}/>
+      <MetricCard label="Fresh quotes" value={`${coverage.fresh_quotes ?? 0} / ${coverage.instruments ?? 0}`} icon={TrendingUp} sub="Full-universe quote coverage"/>
+      <MetricCard label="Liquidity validated" value={String(coverage.liquidity_values ?? 0)} icon={Database} sub={`${coverage.price_candidates_requiring_history ?? 0} price-qualified`}/>
+      <MetricCard label="Eligible candidates" value={String(candidates.length)} icon={CheckCircle2} sub="Ranked by average turnover"/>
+    </div>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Screening criteria</h3><p>Applied to fresh Angel One quotes and completed daily candles.</p></div><span className="ai-tag ai-na">{report.status ?? "unknown"}</span></div>
+      <div className="status-row"><span>Maximum price</span><strong>₹{report.criteria?.max_price_inr ?? "25.00"}</strong></div>
+      <div className="status-row"><span>Minimum average daily value</span><strong>{money(Number(report.criteria?.min_avg_daily_traded_value_inr ?? 50000000))}</strong></div>
+      <div className="status-row"><span>Maximum spread</span><strong>{report.criteria?.max_spread_pct ?? "0.50"}%</strong></div>
+      <div className="status-row"><span>Quote freshness</span><strong>{report.criteria?.max_quote_age_seconds ?? 45}s</strong></div>
+      {Object.keys(report.history_errors ?? {}).length > 0 && <div className="notice error-notice"><span><strong>History errors:</strong> {Object.keys(report.history_errors).length} symbols. Partial coverage is not a complete scan.</span></div>}
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Eligible stocks</h3><p>Price, spread and 20-session liquidity filters passed.</p></div></div>
+      {candidates.length ? <div className="table-wrap"><table><thead><tr><th>Symbol</th><th>Price</th><th>Bid / Ask</th><th>Spread</th><th>Avg daily value</th><th>Quote age</th></tr></thead><tbody>{candidates.map((row:any) => <tr key={row.symbol}><td><strong>{row.symbol}</strong></td><td>{preciseMoney(Number(row.price))}</td><td>{preciseMoney(Number(row.bid))} / {preciseMoney(Number(row.ask))}</td><td>{Number(row.spread_pct).toFixed(3)}%</td><td>{money(Number(row.avg_daily_traded_value))}</td><td>{Number(row.quote_age_seconds).toFixed(1)}s</td></tr>)}</tbody></table></div> : <div className="empty-inline"><Activity size={18}/><span>No eligible stocks in the latest report.</span></div>}
+    </section>
+  </>;
+}
 
 function SettingsPage() {
   const [settings, setSettings] = useState<BotSettings | null>(null);
