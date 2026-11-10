@@ -9,7 +9,9 @@ on:
       - "liquidity_history.py"
       - "test_angel_websocket.py"
       - "test_liquidity_history.py"
-      - "test_low_price_universe.py"\n      - "under_25_research.py"\n      - "test_under_25_research.py"
+      - "test_low_price_universe.py"
+      - "under_25_research.py"
+      - "test_under_25_research.py"
       - ".github/workflows/under-25-equity-tests.yml"
 
 jobs:
