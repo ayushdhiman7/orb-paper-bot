@@ -67,6 +67,7 @@ def test_history_loader_fetches_once_then_reuses_persistent_sqlite_cache(tmp_pat
     assert errors == {}
     assert len(client.calls) == 1
     assert client.calls[0][3] == "ONE_DAY"
+    assert client.calls[0][5] is False  # do not resurrect stale raw-candle cache entries
 
     # New cache object proves the result survives process restart.
     second_client = FakeAngelClient()
