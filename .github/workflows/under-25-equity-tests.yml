@@ -5,6 +5,10 @@ on:
     branches: ["main"]
     paths:
       - "low_price_universe.py"
+      - "angel_websocket.py"
+      - "liquidity_history.py"
+      - "test_angel_websocket.py"
+      - "test_liquidity_history.py"
       - "test_low_price_universe.py"
       - ".github/workflows/under-25-equity-tests.yml"
 
@@ -17,5 +21,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest -r requirements-angelone-test.txt
       - run: python -m pytest -q test_low_price_universe.py test_liquidity_history.py test_angel_websocket.py
