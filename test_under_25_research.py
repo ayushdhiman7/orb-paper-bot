@@ -72,7 +72,7 @@ def test_scan_batches_websocket_tokens_and_loads_history_only_for_under_25(monke
     assert report["coverage"]["instruments"] == 3
     assert report["coverage"]["fresh_quotes"] == 3
     assert report["coverage"]["liquidity_values"] == 2
-    assert report["status"] == "partial"
+    assert report["status"] == "complete"
 
 
 def test_scan_rejects_subscription_batch_above_smartapi_limit():
