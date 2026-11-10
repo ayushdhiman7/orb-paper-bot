@@ -50,10 +50,11 @@ def wait_for_quotes(feed, instruments, *, timeout_seconds=90, poll_seconds=1, cl
 
 
 def build_research_report(*, instruments, quotes, average_values, history_errors,
-                          as_of, generated_at, config=LowPriceConfig()):
+                          as_of, generated_at, config=LowPriceConfig(), history_expected_count=None):
     candidates = select_under_25_candidates(
         instruments, quotes, average_values, now_epoch=generated_at.timestamp(), config=config
     )
+    expected_history = len(instruments) if history_expected_count is None else int(history_expected_count)
     report = {
         "mode": "research_only",
         "paper_only": True,
@@ -70,9 +71,10 @@ def build_research_report(*, instruments, quotes, average_values, history_errors
         "coverage": {
             "instruments": len(instruments),
             "fresh_quotes": len(quotes),
+            "price_candidates_requiring_history": expected_history,
             "liquidity_values": len(average_values),
             "history_errors": len(history_errors),
-            "full_coverage": len(quotes) == len(instruments) and len(average_values) == len(instruments),
+            "full_coverage": len(quotes) == len(instruments) and len(average_values) == expected_history,
         },
         "candidates": candidates,
         "history_errors": {str(k): str(v)[:180] for k, v in history_errors.items()},
@@ -120,6 +122,7 @@ def run_research_scan(*, master, feed_factory, angel_client, as_of=None, generat
     return build_research_report(
         instruments=instruments, quotes=quotes, average_values=values,
         history_errors=errors, as_of=as_of, generated_at=generated_at, config=config,
+        history_expected_count=len(price_candidates),
     )
 
 
