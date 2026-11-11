@@ -98,14 +98,19 @@ def session_vwap(candles):
     return total_value / total_volume if total_volume else None
 
 
-def calculate_indicators(candles, ema_period=20, atr_period=14):
-    """Return latest 5m indicators. At least two EMA values are needed for trend."""
+def calculate_indicators(candles, ema_period=20, atr_period=14, warmup_candles=None):
+    """Return latest 5m indicators. At least two EMA values are needed for trend.
+
+    warmup_candles (optional) are completed bars from the prior session. They only seed the
+    EMA so the trend is usable from the open; VWAP and ATR still use the current session only.
+    """
     rows = _validate(candles)
     if not rows:
         raise ValueError("at least one completed candle is required")
     closes = [row["close"] for row in rows]
-    latest_ema = ema(closes, ema_period)
-    previous_ema = ema(closes[:-1], ema_period) if len(closes) > ema_period else None
+    ema_closes = ([row["close"] for row in _validate(warmup_candles)] if warmup_candles else []) + closes
+    latest_ema = ema(ema_closes, ema_period)
+    previous_ema = ema(ema_closes[:-1], ema_period) if len(ema_closes) > ema_period else None
     close = closes[-1]
     if latest_ema is None or previous_ema is None:
         trend = "insufficient_data"

@@ -6,6 +6,7 @@ never calls an AI service, persists trades, or submits broker orders.
 from __future__ import annotations
 
 from datetime import date, datetime, time
+import os
 from math import isfinite
 from zoneinfo import ZoneInfo
 
@@ -134,7 +135,11 @@ def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_s
                 side = "SELL"
             else:
                 continue
-            snapshot = calculate_indicators(session_candles, ema_period=20, atr_period=14)
+            warmup = []
+            if os.getenv("EMA_WARMUP", "prior_session").strip().lower() != "off":
+                provider = getattr(feed, "warmup_candles", None)
+                warmup = provider(symbol) if callable(provider) else []
+            snapshot = calculate_indicators(session_candles, ema_period=20, atr_period=14, warmup_candles=warmup)
             if not entry_alignment(side, snapshot):
                 continue
             candidates.append({
@@ -149,6 +154,7 @@ def collect_candidates(universe, feed, now, sentiment_by_symbol=None, excluded_s
                     "ema20": round(snapshot.ema20, 4) if snapshot.ema20 is not None else None,
                     "previous_ema20": round(snapshot.previous_ema20, 4) if snapshot.previous_ema20 is not None else None,
                     "trend": snapshot.trend,
+                    "ema_warmup_bars": len(warmup),
                     "vwap": round(snapshot.vwap, 4) if snapshot.vwap is not None else None,
                     "atr14": round(snapshot.atr14, 4) if snapshot.atr14 is not None else None,
                     "extension_atr": round(snapshot.extension_atr, 4) if snapshot.extension_atr is not None else None,

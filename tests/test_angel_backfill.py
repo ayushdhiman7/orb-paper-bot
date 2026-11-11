@@ -55,6 +55,19 @@ def test_retries_then_fails_soft():
     assert backfill_today(f, dead, [{"symbol": "RELIANCE", "token": "2885"}], NOW, sleep=lambda s: None) == ([], ["RELIANCE"])
 
 
-def test_nothing_to_fetch_before_first_bar_completes():
-    early = datetime(2026, 11, 11, 9, 17, tzinfo=IST)
-    assert backfill_today(feed(), Api([]), [{"symbol": "RELIANCE", "token": "2885"}], early, sleep=lambda s: None) == ([], [])
+def test_prior_session_bars_become_warmup_not_session_bars():
+    prior = [[f"2026-11-09T{9 + (15 + 5 * i) // 60:02d}:{(15 + 5 * i) % 60:02d}:00+05:30", 100 + i, 102 + i, 99 + i, 101 + i, 500] for i in range(50)]
+    f = feed()
+    seeded, _ = backfill_today(f, Api(prior + [bar(9, 15, 2500)]), [{"symbol": "RELIANCE", "token": "2885"}], NOW, sleep=lambda s: None)
+    assert seeded == ["RELIANCE"]
+    warm = f.warmup_candles("RELIANCE")
+    assert len(warm) == 40 and warm[-1]["timestamp"].date().isoformat() == "2026-11-09"
+    assert [c["timestamp"].date().isoformat() for c in f.candles("RELIANCE")] == ["2026-11-11"]
+
+
+def test_before_first_bar_still_loads_warmup():
+    early = datetime(2026, 11, 11, 9, 5, tzinfo=IST)
+    prior = [["2026-11-09T15:25:00+05:30", 100, 102, 99, 101, 500]]
+    f = feed()
+    assert backfill_today(f, Api(prior), [{"symbol": "RELIANCE", "token": "2885"}], early, sleep=lambda s: None) == (["RELIANCE"], [])
+    assert len(f.warmup_candles("RELIANCE")) == 1 and f.candles("RELIANCE") == []

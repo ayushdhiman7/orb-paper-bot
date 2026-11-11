@@ -68,7 +68,9 @@ def start_feed():
     try:  # restore today's completed bars so a late start or restart still has its opening range
         seeded, failed = backfill_today(feed, getattr(feed, "_api", None), universe,
                                         datetime.now(ZoneInfo("Asia/Kolkata")))
-        print(f"[NIFTY50] history backfill: {len(seeded)} symbols seeded, {len(failed)} failed")
+        warm = sum(1 for row in universe if feed.warmup_candles(row["symbol"]))
+        print(f"[NIFTY50] history backfill: {len(seeded)} symbols seeded, {len(failed)} failed; "
+              f"EMA_WARMUP={os.getenv('EMA_WARMUP', 'prior_session')} ({warm} symbols with prior-session bars)")
     except Exception as exc:
         print(f"[warn] history backfill skipped ({type(exc).__name__})")
     return universe, feed

@@ -51,6 +51,7 @@ class AngelWebSocketFeed:
         self._last_day_volume = {}
         self._session_dates = {}
         self._forming = {}
+        self._warmup = {}
         self._completed = {s: deque(maxlen=200) for s in self.symbols}
         self._forming_1m = {}
         self._completed_1m = {s: deque(maxlen=500) for s in self.symbols}
@@ -208,6 +209,7 @@ class AngelWebSocketFeed:
             self._last_day_volume.pop(symbol, None)
             self._forming.pop(symbol, None)
             self._completed[symbol].clear()
+            self._warmup.pop(symbol, None)  # prior-session bars from an earlier day are stale
             self._forming_1m.pop(symbol, None)
             self._completed_1m[symbol].clear()
 
@@ -333,6 +335,15 @@ class AngelWebSocketFeed:
                         forming["low"] = min(forming["low"], row["low"])
                         forming["volume"] = max(forming["volume"], row["volume"])
             return len(added)
+
+    def set_warmup(self, symbol, rows):
+        """Completed prior-session 5m bars, used only to seed EMA warm-up (never traded on directly)."""
+        with self._lock:
+            self._warmup[base_name(symbol)] = [dict(row) for row in rows]
+
+    def warmup_candles(self, symbol):
+        with self._lock:
+            return [dict(row) for row in self._warmup.get(base_name(symbol), ())]
 
     def stop(self):
         self.connected = False
