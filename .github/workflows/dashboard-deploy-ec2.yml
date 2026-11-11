@@ -11,6 +11,11 @@ on:
       - "dashboard/**"
       - ".github/workflows/dashboard-deploy-ec2.yml"
   workflow_dispatch:
+    inputs:
+      restart_bot:
+        description: "Pull the latest bot code on EC2 and restart orb-bot (only when no position is open)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -100,7 +105,7 @@ jobs:
       # `systemctl start` does nothing when the bot is already running, so a live session is never interrupted.
       # Failure here only warns: it must not fail or roll back the dashboard deploy.
       - name: Start paper bot if inside the trading window
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && inputs.restart_bot != true
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
@@ -116,3 +121,16 @@ jobs:
             "sudo -n systemctl start orb-bot; sleep 20; systemctl is-active orb-bot" \
             && echo "orb-bot is active" \
             || echo "::warning::Could not confirm orb-bot is active. Check: journalctl -u orb-bot"
+
+      # Manual only: pick up new bot code and restart. Safe only with no open paper position (the bot restores state, but check first).
+      - name: Pull bot code and restart paper bot (manual)
+        if: github.event_name == 'workflow_dispatch' && inputs.restart_bot == true
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          set -uo pipefail
+          ssh -i ~/.ssh/orb_dashboard_deploy "$EC2_USER@$EC2_HOST" \
+            "git -C ~/orb-paper-bot pull --ff-only -q && git -C ~/orb-paper-bot log --oneline -1 && sudo -n systemctl restart orb-bot && sleep 75 && systemctl is-active orb-bot && journalctl -u orb-bot --since '-90sec' --no-pager | grep -iE 'backfill|coverage|candidates|started' | tail -6" \
+            && echo "orb-bot restarted" \
+            || echo "::warning::Restart could not be confirmed. Check: journalctl -u orb-bot"
