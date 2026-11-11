@@ -304,6 +304,36 @@ class AngelWebSocketFeed:
         with self._lock:
             return [row.copy() for row in self._completed.get(base_name(symbol), ())]
 
+    def seed_completed(self, symbol, rows, session_date):
+        """Merge completed 5m bars fetched from history into today's candles.
+
+        Used after a mid-session start or restart so the opening range and indicators
+        match an on-time run. Live bars win on overlap; returns how many bars were added.
+        """
+        name = base_name(symbol)
+        with self._lock:
+            if name not in self._completed:
+                return 0
+            # Without this, the first live packet would see an unseen session and clear the seeded bars.
+            self._session_dates[name] = session_date
+            live = list(self._completed[name])
+            live_stamps = {row["timestamp"] for row in live}
+            forming = self._forming.get(name)
+            cutoff = forming["timestamp"] if forming else None
+            added = [row for row in rows if row["timestamp"] not in live_stamps
+                     and (cutoff is None or row["timestamp"] < cutoff)]
+            merged = sorted(added + live, key=lambda row: row["timestamp"])
+            self._completed[name].clear()
+            self._completed[name].extend(merged)
+            if forming:  # the forming bar began mid-bucket from live ticks; restore its earlier range
+                for row in rows:
+                    if row["timestamp"] == forming["timestamp"]:
+                        forming["open"] = row["open"]
+                        forming["high"] = max(forming["high"], row["high"])
+                        forming["low"] = min(forming["low"], row["low"])
+                        forming["volume"] = max(forming["volume"], row["volume"])
+            return len(added)
+
     def stop(self):
         self.connected = False
         if self.socket is not None:

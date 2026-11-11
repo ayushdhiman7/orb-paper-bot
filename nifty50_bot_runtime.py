@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from angel_backfill import backfill_today
 from angel_websocket import AngelWebSocketFeed
 from batch_entry import PortfolioLimits
 from nifty_universe import fetch_nifty50_universe, write_universe_cache
@@ -62,6 +65,12 @@ def start_feed():
             f"missing: {', '.join(missing[:10])}. [{diagnostics}] "
             "Refusing partial-universe operation and data fallback."
         )
+    try:  # restore today's completed bars so a late start or restart still has its opening range
+        seeded, failed = backfill_today(feed, getattr(feed, "_api", None), universe,
+                                        datetime.now(ZoneInfo("Asia/Kolkata")))
+        print(f"[NIFTY50] history backfill: {len(seeded)} symbols seeded, {len(failed)} failed")
+    except Exception as exc:
+        print(f"[warn] history backfill skipped ({type(exc).__name__})")
     return universe, feed
 
 
