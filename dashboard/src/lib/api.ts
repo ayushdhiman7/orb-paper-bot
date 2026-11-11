@@ -97,3 +97,11 @@ export async function saveBotSettings(settings: Partial<Omit<BotSettings, "paper
   if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Settings save failed (HTTP ${response.status}).`);
   return payload as BotSettingsResponse;
 }
+
+
+export async function loadResearch(): Promise<any> {
+  const response = await fetch(`${apiBase}/api/research/under-25`, { headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : "Unable to load the research report.");
+  return payload;
+}

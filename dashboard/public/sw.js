@@ -1,8 +1,8 @@
-// ORB Terminal service worker.
+// ORB v2 service worker.
 // - App shell: network-first (so a new deploy shows up on the next visit), cached copy when offline.
 // - /assets/* files are content-hashed by the build, so they are cache-first.
 // - /api/* is NEVER cached: trading numbers must be live, and a stale copy would look current.
-const CACHE = "orb-terminal-v1";
+const CACHE = "orb-v2-1";
 const SHELL = ["./", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {

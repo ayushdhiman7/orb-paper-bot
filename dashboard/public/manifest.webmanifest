@@ -1,6 +1,6 @@
 {
-  "name": "ORB Terminal",
-  "short_name": "ORB",
+  "name": "ORB v2",
+  "short_name": "ORB v2",
   "description": "Paper-trading dashboard for the ORB bot: P&L, open positions, AI vs no-AI and backtests. Paper only, no live orders.",
   "id": "./",
   "start_url": "./",
