@@ -460,6 +460,19 @@ def _square_off_all(state, now):
             )
 
 
+_NOTICE_SEEN = {}
+
+
+def _fresh_lines(kind, lines, now):
+    """Return only the lines not already sent today for this kind (keeps Telegram quiet)."""
+    seen = _NOTICE_SEEN.setdefault(kind, {"day": now.date(), "items": set()})
+    if seen["day"] != now.date():
+        seen["day"], seen["items"] = now.date(), set()
+    fresh = [line for line in lines if line not in seen["items"]]
+    seen["items"].update(fresh)
+    return fresh
+
+
 def run():
     if os.getenv("ORB_RUNTIME_MODE", "").strip().lower() != "nifty50_batch":
         raise RuntimeError("Set ORB_RUNTIME_MODE=nifty50_batch explicitly to run this entry point")
@@ -554,7 +567,9 @@ def run():
                             f"{row.get('symbol', 'PORTFOLIO')} REJECTED: {row.get('reason')}"
                             for row in rejected
                         )
-                        notify.send("🧠 NIFTY50 POSITION REVIEW\n" + "\n".join(lines)[:3200])
+                        lines = _fresh_lines("position-review", lines, now)
+                        if lines:
+                            notify.send("🧠 NIFTY50 POSITION REVIEW\n" + "\n".join(lines)[:3200])
                     _apply_management_decisions(state, approved, now)
                 due = last_scan is None or (now - last_scan).total_seconds() >= int(settings["scan_interval_seconds"])
                 if due and clock < core.NO_NEW_TRADES_AFTER and not state.halted and not getattr(state, "risk_mark_blocked", False):
@@ -574,11 +589,15 @@ def run():
                             f"{row.get('symbol', 'unknown')} REJECTED: {row.get('reason', row.get('verdict', 'risk check failed'))}"
                             for row in result.rejections
                         ]
-                        notify.send("🛡️ NIFTY50 RISK VERDICTS\n" + "\n".join(lines)[:3200])
+                        lines = _fresh_lines("risk-verdicts", lines, now)
+                        if lines:
+                            notify.send("🛡️ NIFTY50 RISK VERDICTS\n" + "\n".join(lines)[:3200])
                     if result is not None and result.status in {"approved", "no_approved_entries"}:
                         _apply_plans(state, result, now)
                     elif result is not None:
-                        notify.send(f"⚠️ NIFTY50 batch blocked: {result.status}; no entries")
+                        # "no_candidates" is the normal idle state: keep it in the journal, not in Telegram.
+                        if result.status != "no_candidates" and _fresh_lines("batch-blocked", [result.status], now):
+                            notify.send(f"⚠️ NIFTY50 batch blocked: {result.status}; no entries")
             time.sleep(5)
     finally:
         feed.stop()
