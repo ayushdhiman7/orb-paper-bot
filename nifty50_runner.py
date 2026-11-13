@@ -322,10 +322,11 @@ def _apply_management_decisions(state, approved, now):
             # Mutate memory only after the database confirms the durable level change.
             pos.stop = proposed_stop
             pos.target = proposed_target
-            notify.send(
-                f"🧠 AI POSITION {action} {symbol} | confidence {decision.confidence:.0%} "
-                f"| SL {pos.stop:.2f} TP {pos.target:.2f} | {decision.reason}"
-            )
+            if _chatty():
+                notify.send(
+                    f"🧠 AI POSITION {action} {symbol} | confidence {decision.confidence:.0%} "
+                    f"| SL {pos.stop:.2f} TP {pos.target:.2f} | {decision.reason}"
+                )
             webhook.emit("risk.alert", now, {
                 "symbol": symbol, "action": action, "confidence": decision.confidence,
                 "stop": pos.stop, "target": pos.target, "reason": decision.reason,
@@ -371,7 +372,8 @@ def _apply_deterministic_protection(state, now, settings):
             continue
         pos.stop = new_stop
         changed = True
-        notify.send(f"🔒 {symbol} {trigger}: protective stop tightened to {pos.stop:.2f}")
+        if _chatty():
+            notify.send(f"🔒 {symbol} {trigger}: protective stop tightened to {pos.stop:.2f}")
         webhook.emit("risk.alert", now, {
             "symbol": symbol, "action": trigger, "stop": pos.stop,
             "mode": "paper", "risk_verdict": "APPROVED",
@@ -460,6 +462,11 @@ def _square_off_all(state, now):
             )
 
 
+def _chatty():
+    """Detail messages (risk verdicts, reviews, stop moves) are off by default; TELEGRAM_VERBOSE=on enables them."""
+    return os.getenv("TELEGRAM_VERBOSE", "off").strip().lower() in {"on", "1", "true", "yes"}
+
+
 _NOTICE_SEEN = {}
 
 
@@ -522,7 +529,8 @@ def run():
                         settings, settings_version = latest_settings, latest_version
                         _apply_runtime_settings(settings, feed)
                         print(f"[SETTINGS] applied version {settings_version}")
-                        notify.send(f"⚙️ ORB settings updated · version {settings_version}")
+                        if _chatty():
+                            notify.send(f"⚙️ ORB settings updated · version {settings_version}")
                 except Exception as exc:
                     state.halted = True
                     print(f"[HALT] runtime settings unavailable ({type(exc).__name__}); entries disabled")
@@ -568,7 +576,7 @@ def run():
                             for row in rejected
                         )
                         lines = _fresh_lines("position-review", lines, now)
-                        if lines:
+                        if lines and _chatty():
                             notify.send("🧠 NIFTY50 POSITION REVIEW\n" + "\n".join(lines)[:3200])
                     _apply_management_decisions(state, approved, now)
                 due = last_scan is None or (now - last_scan).total_seconds() >= int(settings["scan_interval_seconds"])
@@ -590,13 +598,13 @@ def run():
                             for row in result.rejections
                         ]
                         lines = _fresh_lines("risk-verdicts", lines, now)
-                        if lines:
+                        if lines and _chatty():
                             notify.send("🛡️ NIFTY50 RISK VERDICTS\n" + "\n".join(lines)[:3200])
                     if result is not None and result.status in {"approved", "no_approved_entries"}:
                         _apply_plans(state, result, now)
                     elif result is not None:
                         # "no_candidates" is the normal idle state: keep it in the journal, not in Telegram.
-                        if result.status != "no_candidates" and _fresh_lines("batch-blocked", [result.status], now):
+                        if _chatty() and result.status != "no_candidates" and _fresh_lines("batch-blocked", [result.status], now):
                             notify.send(f"⚠️ NIFTY50 batch blocked: {result.status}; no entries")
             time.sleep(5)
     finally:

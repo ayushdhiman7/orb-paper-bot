@@ -17,3 +17,10 @@ def test_kinds_do_not_share_history():
     now = datetime(2026, 11, 11, 10, 0)
     assert runner._fresh_lines("x", ["same"], now) == ["same"]
     assert runner._fresh_lines("y", ["same"], now) == ["same"]
+
+
+def test_detail_messages_are_off_unless_verbose(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_VERBOSE", raising=False)
+    assert runner._chatty() is False
+    monkeypatch.setenv("TELEGRAM_VERBOSE", "on")
+    assert runner._chatty() is True
